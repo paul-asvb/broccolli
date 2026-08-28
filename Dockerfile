@@ -4,13 +4,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
-RUN rm -rf src
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install trunk --locked
 
-COPY src ./src
-RUN touch src/main.rs && cargo build --release
+COPY . .
+RUN cargo build --release
 
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
