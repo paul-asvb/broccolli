@@ -1,1 +1,6 @@
 /target
+telegram_dump.jsonl
+telegram_dump.offset
+.env
+chat.json
+chat_export/
