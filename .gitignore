@@ -1,5 +1,6 @@
 /target
 /web/dist
+/web/target
 telegram_dump.jsonl
 telegram_dump.offset
 .env
