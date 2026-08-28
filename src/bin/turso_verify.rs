@@ -1,25 +1,20 @@
+use broccolli::db;
+
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
+    let conn = db::connect().await;
 
-    let url = std::env::var("TURSO_DATABASE_URL").expect("set TURSO_DATABASE_URL");
-    let token = std::env::var("TURSO_AUTH_TOKEN").expect("set TURSO_AUTH_TOKEN");
+    let count = db::count_messages(&conn).await;
+    println!("row count: {count}");
 
-    let db = libsql::Builder::new_remote(url, token)
-        .build()
-        .await
-        .expect("failed to connect to turso");
-    let conn = db.connect().expect("failed to open connection");
-
-    let mut rows = conn
-        .query("PRAGMA table_info(messages)", ())
-        .await
-        .expect("failed to query schema");
-
-    println!("messages columns:");
-    while let Some(row) = rows.next().await.expect("failed to read row") {
-        let name: String = row.get(1).unwrap();
-        let ty: String = row.get(2).unwrap();
-        println!("  {name}: {ty}");
+    for sample in db::sample_messages(&conn, 3).await {
+        let db::MessageSample {
+            chat_id,
+            message_id,
+            date_unixtime,
+            from_name,
+            text,
+        } = sample;
+        println!("{chat_id}/{message_id} @ {date_unixtime} from={from_name:?} text={text:?}");
     }
 }
