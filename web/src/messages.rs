@@ -1,5 +1,7 @@
 use gloo_net::http::Request;
+use js_sys::Date;
 use serde::Deserialize;
+use wasm_bindgen::JsValue;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -11,8 +13,21 @@ struct QueryParams {
 
 #[derive(Deserialize, Clone, PartialEq)]
 struct Message {
-    from_name: Option<String>,
+    date_unixtime: i64,
     text: Option<String>,
+}
+
+fn sort_by_date(messages: &mut [Message], ascending: bool) {
+    if ascending {
+        messages.sort_by_key(|m| m.date_unixtime);
+    } else {
+        messages.sort_by_key(|m| std::cmp::Reverse(m.date_unixtime));
+    }
+}
+
+fn format_date(unixtime: i64) -> String {
+    let date = Date::new(&JsValue::from_f64((unixtime * 1000) as f64));
+    String::from(date.to_locale_string("default", &JsValue::UNDEFINED))
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
@@ -31,6 +46,7 @@ pub fn messages_page() -> Html {
     let per_page = query.per_page.unwrap_or(50).max(1);
 
     let data = use_state(|| None::<MessagesResponse>);
+    let ascending = use_state(|| true);
 
     {
         let data = data.clone();
@@ -50,8 +66,14 @@ pub fn messages_page() -> Html {
         });
     }
 
-    let Some(data) = (*data).clone() else {
+    let Some(mut data) = (*data).clone() else {
         return html! { <p>{ "loading..." }</p> };
+    };
+    sort_by_date(&mut data.messages, *ascending);
+
+    let toggle_sort = {
+        let ascending = ascending.clone();
+        Callback::from(move |_| ascending.set(!*ascending))
     };
 
     let total_pages = ((data.total + data.per_page - 1) / data.per_page.max(1)).max(1);
@@ -61,14 +83,18 @@ pub fn messages_page() -> Html {
         data.per_page
     );
     let next_href = format!("/messages?page={}&per_page={}", data.page + 1, data.per_page);
+    let page_href = |p: i64| format!("/messages?page={}&per_page={}", p, data.per_page);
 
     html! {
         <div>
             <h2>{ format!("Messages — page {} of {} ({} total)", data.page, total_pages, data.total) }</h2>
+            <button onclick={toggle_sort}>
+                { if *ascending { "Sort: oldest first" } else { "Sort: newest first" } }
+            </button>
             <ul>
                 { for data.messages.iter().map(|m| html! {
                     <li>
-                        <strong>{ m.from_name.clone().unwrap_or_else(|| "?".to_string()) }</strong>
+                        <strong>{ format_date(m.date_unixtime) }</strong>
                         { ": " }
                         { m.text.clone().unwrap_or_default() }
                     </li>
@@ -77,6 +103,16 @@ pub fn messages_page() -> Html {
             <p>
                 <a href={prev_href}>{ "« prev" }</a>
                 { " " }
+                { for (1..=total_pages).map(|p| html! {
+                    <>
+                        { if p == data.page {
+                            html! { <strong>{ p }</strong> }
+                        } else {
+                            html! { <a href={page_href(p)}>{ p }</a> }
+                        } }
+                        { " " }
+                    </>
+                }) }
                 <a href={next_href}>{ "next »" }</a>
             </p>
         </div>

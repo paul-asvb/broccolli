@@ -1067,7 +1067,9 @@ name = "web"
 version = "0.1.0"
 dependencies = [
  "gloo-net 0.6.0",
+ "js-sys",
  "serde",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "yew",
  "yew-router",
