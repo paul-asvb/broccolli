@@ -1,5 +1,7 @@
 mod messages;
+mod processing;
 mod telegram;
+mod worker;
 
 use axum::body::Body;
 use axum::extract::{Path, Request};
@@ -111,6 +113,15 @@ async fn main() {
     let protected = Router::new()
         .route("/", get(index))
         .route("/api/messages", get(messages::list))
+        .route(
+            "/api/messages/{chat_id}/{message_id}",
+            get(processing::message_detail),
+        )
+        .route(
+            "/api/messages/{chat_id}/{message_id}/process",
+            axum::routing::post(processing::enqueue),
+        )
+        .route("/api/processing", get(processing::summary))
         .route("/{*path}", get(web_asset))
         .route_layer(middleware::from_fn(basic_auth));
 
@@ -118,6 +129,8 @@ async fn main() {
         .route("/health", get(health))
         .route("/telegram/updates", get(telegram::updates))
         .merge(protected);
+
+    tokio::spawn(worker::run());
 
     let port: u16 = std::env::var("PORT")
         .ok()

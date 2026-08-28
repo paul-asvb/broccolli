@@ -10,6 +10,8 @@ pub fn header() -> Html {
                 <Link<Route> to={Route::Home}>{ "Home" }</Link<Route>>
                 { " · " }
                 <Link<Route> to={Route::Messages}>{ "Messages" }</Link<Route>>
+                { " · " }
+                <Link<Route> to={Route::Processing}>{ "Processing" }</Link<Route>>
             </nav>
         </header>
     }

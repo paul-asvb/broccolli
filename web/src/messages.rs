@@ -13,6 +13,8 @@ struct QueryParams {
 
 #[derive(Deserialize, Clone, PartialEq)]
 struct Message {
+    chat_id: i64,
+    message_id: i64,
     date_unixtime: i64,
     text: Option<String>,
 }
@@ -94,7 +96,9 @@ pub fn messages_page() -> Html {
             <ul>
                 { for data.messages.iter().map(|m| html! {
                     <li>
-                        <strong>{ format_date(m.date_unixtime) }</strong>
+                        <a href={format!("/messages/{}/{}", m.chat_id, m.message_id)}>
+                            <strong>{ format_date(m.date_unixtime) }</strong>
+                        </a>
                         { ": " }
                         { m.text.clone().unwrap_or_default() }
                     </li>
