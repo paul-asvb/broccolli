@@ -5,14 +5,9 @@ default:
 run:
     cargo run --bin broccolli
 
-# run the backend and the yew frontend dev server together
+# run the axum server, rebuilding and restarting on any backend change
 dev:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    trap 'kill 0' EXIT
-    (cd web && trunk serve --port 8081) &
-    cargo run --bin broccolli &
-    wait
+    cargo watch -w src -x 'run --bin broccolli'
 
 # type-check and lint everything
 check:

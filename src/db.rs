@@ -1,4 +1,5 @@
 use libsql::{params, Connection};
+use serde::Serialize;
 use serde_json::Value;
 
 pub async fn connect() -> Connection {
@@ -95,6 +96,38 @@ pub async fn sample_messages(conn: &Connection, limit: i64) -> Vec<MessageSample
         });
     }
     samples
+}
+
+#[derive(Serialize)]
+pub struct Message {
+    pub chat_id: i64,
+    pub message_id: i64,
+    pub date_unixtime: i64,
+    pub from_name: Option<String>,
+    pub text: Option<String>,
+}
+
+pub async fn list_messages(conn: &Connection, page: i64, per_page: i64) -> Vec<Message> {
+    let offset = (page.max(1) - 1) * per_page;
+    let mut rows = conn
+        .query(
+            "SELECT chat_id, message_id, date_unixtime, from_name, text FROM messages ORDER BY date_unixtime LIMIT ?1 OFFSET ?2",
+            params![per_page, offset],
+        )
+        .await
+        .expect("failed to list messages");
+
+    let mut messages = Vec::new();
+    while let Some(row) = rows.next().await.unwrap() {
+        messages.push(Message {
+            chat_id: row.get(0).unwrap(),
+            message_id: row.get(1).unwrap(),
+            date_unixtime: row.get(2).unwrap(),
+            from_name: row.get(3).unwrap(),
+            text: row.get(4).unwrap(),
+        });
+    }
+    messages
 }
 
 fn flatten_text(value: &Value) -> String {

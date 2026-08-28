@@ -1,13 +1,14 @@
+mod messages;
+mod telegram;
+
 use axum::body::Body;
-use axum::extract::{Path, Query, Request};
+use axum::extract::{Path, Request};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
-use axum::{routing::get, Json, Router};
+use axum::{routing::get, Router};
 use base64::Engine;
 use rust_embed::RustEmbed;
-use serde::Deserialize;
-use serde_json::Value;
 use std::net::SocketAddr;
 
 #[derive(RustEmbed)]
@@ -16,45 +17,6 @@ struct WebAssets;
 
 async fn health() -> &'static str {
     "ok"
-}
-
-#[derive(Deserialize)]
-struct UpdatesQuery {
-    offset: Option<i64>,
-    timeout: Option<u64>,
-}
-
-async fn telegram_updates(
-    Query(params): Query<UpdatesQuery>,
-) -> Result<Json<Value>, (StatusCode, String)> {
-    let token = std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "TELEGRAM_BOT_TOKEN not set".to_string(),
-        )
-    })?;
-
-    let mut query = vec![("timeout".to_string(), params.timeout.unwrap_or(0).to_string())];
-    if let Some(offset) = params.offset {
-        query.push(("offset".to_string(), offset.to_string()));
-    }
-
-    let resp = reqwest::Client::new()
-        .get(format!("https://api.telegram.org/bot{token}/getUpdates"))
-        .query(&query)
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("telegram request failed: {e}")))?
-        .json::<Value>()
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("failed to parse telegram response: {e}"),
-            )
-        })?;
-
-    Ok(Json(resp))
 }
 
 async fn index() -> impl IntoResponse {
@@ -69,15 +31,24 @@ async fn index() -> impl IntoResponse {
 }
 
 async fn web_asset(Path(path): Path<String>) -> impl IntoResponse {
-    match WebAssets::get(&path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(&path).first_or_octet_stream();
-            (
-                [(header::CONTENT_TYPE, mime.as_ref().to_string())],
-                content.data.into_owned(),
-            )
-                .into_response()
-        }
+    if let Some(content) = WebAssets::get(&path) {
+        let mime = mime_guess::from_path(&path).first_or_octet_stream();
+        return (
+            [(header::CONTENT_TYPE, mime.as_ref().to_string())],
+            content.data.into_owned(),
+        )
+            .into_response();
+    }
+
+    // unmatched api routes are a real 404, not a client-side route
+    if path == "api" || path.starts_with("api/") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    // fall back to index.html so the yew router can handle client-side routes
+    // (e.g. /messages) that don't correspond to an embedded asset
+    match WebAssets::get("index.html") {
+        Some(content) => Html(content.data.into_owned()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -139,12 +110,13 @@ async fn main() {
 
     let protected = Router::new()
         .route("/", get(index))
+        .route("/api/messages", get(messages::list))
         .route("/{*path}", get(web_asset))
         .route_layer(middleware::from_fn(basic_auth));
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/telegram/updates", get(telegram_updates))
+        .route("/telegram/updates", get(telegram::updates))
         .merge(protected);
 
     let port: u16 = std::env::var("PORT")
