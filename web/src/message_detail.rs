@@ -41,19 +41,6 @@ struct MessageDetail {
     analysis: Option<Analysis>,
 }
 
-#[derive(Deserialize, Clone, PartialEq)]
-struct TiktokDownloadResult {
-    path: String,
-}
-
-#[derive(Clone, PartialEq)]
-enum TiktokDownloadState {
-    Idle,
-    Downloading,
-    Done(String),
-    Failed(String),
-}
-
 fn format_date(unixtime: i64) -> String {
     let date = Date::new(&JsValue::from_f64((unixtime * 1000) as f64));
     String::from(date.to_locale_string("default", &JsValue::UNDEFINED))
@@ -71,7 +58,6 @@ pub fn message_detail_page(props: &Props) -> Html {
 
     let data = use_state(|| None::<MessageDetail>);
     let enqueueing = use_state(|| false);
-    let tiktok_download = use_state(|| TiktokDownloadState::Idle);
 
     {
         let data = data.clone();
@@ -98,30 +84,6 @@ pub fn message_detail_page(props: &Props) -> Html {
                 let _ = Request::post(&url).send().await;
                 data.set(fetch_detail(chat_id, message_id).await);
                 enqueueing.set(false);
-            });
-        })
-    };
-
-    let download_tiktok_video = {
-        let tiktok_download = tiktok_download.clone();
-        Callback::from(move |_| {
-            let tiktok_download = tiktok_download.clone();
-            tiktok_download.set(TiktokDownloadState::Downloading);
-            wasm_bindgen_futures::spawn_local(async move {
-                let url = format!("/api/messages/{chat_id}/{message_id}/download-tiktok");
-                let result = match Request::post(&url).send().await {
-                    Ok(resp) if resp.ok() => resp
-                        .json::<TiktokDownloadResult>()
-                        .await
-                        .map(|r| r.path)
-                        .map_err(|e| e.to_string()),
-                    Ok(resp) => Err(resp.text().await.unwrap_or_else(|_| resp.status_text())),
-                    Err(e) => Err(e.to_string()),
-                };
-                tiktok_download.set(match result {
-                    Ok(path) => TiktokDownloadState::Done(path),
-                    Err(err) => TiktokDownloadState::Failed(err),
-                });
             });
         })
     };
@@ -168,39 +130,17 @@ pub fn message_detail_page(props: &Props) -> Html {
             <h3>{ "Analysis" }</h3>
             { match data.analysis {
                 Some(a) => html! {
-                    <>
-                        <ul>
-                            <li>{ format!("category: {}", a.category) }</li>
-                            <li>{ format!("needs follow-up: {}", a.needs_followup) }</li>
-                            <li>{ format!("model: {}", a.model) }</li>
-                            <li>{ format!("analyzed: {}", format_date(a.created_at)) }</li>
-                            { if let Some(reasoning) = a.reasoning {
-                                html! { <li>{ format!("reasoning: {reasoning}") }</li> }
-                            } else {
-                                html! {}
-                            } }
-                        </ul>
-                        { if a.category == "tiktok_video" {
-                            html! {
-                                <div>
-                                    <button
-                                        onclick={download_tiktok_video}
-                                        disabled={*tiktok_download == TiktokDownloadState::Downloading}
-                                    >
-                                        { "Download video" }
-                                    </button>
-                                    { match &*tiktok_download {
-                                        TiktokDownloadState::Idle => html! {},
-                                        TiktokDownloadState::Downloading => html! { <p>{ "downloading..." }</p> },
-                                        TiktokDownloadState::Done(path) => html! { <p>{ format!("saved to {path}") }</p> },
-                                        TiktokDownloadState::Failed(err) => html! { <p>{ format!("failed: {err}") }</p> },
-                                    } }
-                                </div>
-                            }
+                    <ul>
+                        <li>{ format!("category: {}", a.category) }</li>
+                        <li>{ format!("needs follow-up: {}", a.needs_followup) }</li>
+                        <li>{ format!("model: {}", a.model) }</li>
+                        <li>{ format!("analyzed: {}", format_date(a.created_at)) }</li>
+                        { if let Some(reasoning) = a.reasoning {
+                            html! { <li>{ format!("reasoning: {reasoning}") }</li> }
                         } else {
                             html! {}
                         } }
-                    </>
+                    </ul>
                 },
                 None => html! { <p>{ "no analysis yet" }</p> },
             } }

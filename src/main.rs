@@ -122,10 +122,6 @@ async fn main() {
             "/api/messages/{chat_id}/{message_id}/process",
             axum::routing::post(processing::enqueue),
         )
-        .route(
-            "/api/messages/{chat_id}/{message_id}/download-tiktok",
-            axum::routing::post(processing::download_tiktok),
-        )
         .route("/api/processing", get(processing::summary))
         .route("/{*path}", get(web_asset))
         .route_layer(middleware::from_fn(basic_auth));
