@@ -1,7 +1,7 @@
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::Json;
-use broccolli::db;
+use broccolli::{db, tiktok};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -36,6 +36,34 @@ pub async fn enqueue(
         .await
         .map(Json)
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+#[derive(Serialize)]
+pub struct TiktokDownloadResult {
+    path: String,
+}
+
+pub async fn download_tiktok(
+    Path((chat_id, message_id)): Path<(i64, i64)>,
+) -> Result<Json<TiktokDownloadResult>, (StatusCode, String)> {
+    let conn = db::connect().await;
+    let message = db::get_message(&conn, chat_id, message_id)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, "message not found".to_string()))?;
+
+    let url = message
+        .text
+        .as_deref()
+        .and_then(tiktok::find_url)
+        .ok_or((StatusCode::BAD_REQUEST, "no tiktok.com URL found in message text".to_string()))?;
+
+    let path = tiktok::download(url, &format!("{chat_id}_{message_id}"))
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+
+    Ok(Json(TiktokDownloadResult {
+        path: path.display().to_string(),
+    }))
 }
 
 #[derive(Serialize)]

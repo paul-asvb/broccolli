@@ -109,6 +109,7 @@ async fn basic_auth(req: Request, next: Next) -> Response {
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
+    env_logger::init();
 
     let protected = Router::new()
         .route("/", get(index))
@@ -120,6 +121,10 @@ async fn main() {
         .route(
             "/api/messages/{chat_id}/{message_id}/process",
             axum::routing::post(processing::enqueue),
+        )
+        .route(
+            "/api/messages/{chat_id}/{message_id}/download-tiktok",
+            axum::routing::post(processing::download_tiktok),
         )
         .route("/api/processing", get(processing::summary))
         .route("/{*path}", get(web_asset))

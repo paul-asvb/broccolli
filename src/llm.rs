@@ -44,6 +44,13 @@ pub async fn classify(
     let api_key = std::env::var("OPENROUTER_API_KEY")
         .map_err(|_| "OPENROUTER_API_KEY not set".to_string())?;
 
+    log::debug!(
+        "classifying chat {} message {} with model {model} ({} context messages)",
+        target.chat_id,
+        target.message_id,
+        context.len()
+    );
+
     let context_text = context.iter().map(format_message).collect::<Vec<_>>().join("\n");
     let target_text = format_message(target);
 
@@ -81,6 +88,8 @@ pub async fn classify(
         "response_format": {"type": "json_object"},
     });
 
+    log::debug!("openrouter request body: {body}");
+
     let resp = client
         .post(OPENROUTER_URL)
         .bearer_auth(api_key)
@@ -94,12 +103,22 @@ pub async fn classify(
         .await
         .map_err(|e| format!("failed to parse openrouter response: {e}"))?;
 
+    log::debug!("openrouter raw response: {raw}");
+
     let content = raw["choices"][0]["message"]["content"]
         .as_str()
         .ok_or_else(|| format!("unexpected openrouter response shape: {raw}"))?;
 
     let classification: Classification = serde_json::from_str(content)
         .map_err(|e| format!("failed to parse classification json ({content}): {e}"))?;
+
+    log::debug!(
+        "classified chat {} message {} as category={} needs_followup={}",
+        target.chat_id,
+        target.message_id,
+        classification.category,
+        classification.needs_followup
+    );
 
     Ok((classification, raw.to_string()))
 }

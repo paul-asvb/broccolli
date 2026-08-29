@@ -47,7 +47,7 @@ pub async fn run() {
                     .await;
 
                     if classification.category == "tiktok_video" {
-                        download_tiktok(&client, chat_id, message_id, &target).await;
+                        download_tiktok(chat_id, message_id, &target).await;
                     }
 
                     db::mark_processing_done(&conn, chat_id, message_id).await;
@@ -64,22 +64,14 @@ pub async fn run() {
 /// Downloads and stashes a classified TikTok video in a temp dir, on a best-effort
 /// basis. A failure here doesn't fail the message's processing state — the
 /// classification itself already succeeded.
-async fn download_tiktok(client: &reqwest::Client, chat_id: i64, message_id: i64, target: &db::Message) {
+async fn download_tiktok(chat_id: i64, message_id: i64, target: &db::Message) {
     let Some(url) = target.text.as_deref().and_then(tiktok::find_url) else {
         eprintln!("tiktok_video classification for chat {chat_id} message {message_id} but no tiktok.com URL found in text");
         return;
     };
 
-    let video = match tiktok::download(client, url).await {
-        Ok(video) => video,
-        Err(err) => {
-            eprintln!("failed to download tiktok video for chat {chat_id} message {message_id}: {err}");
-            return;
-        }
-    };
-
-    match tiktok::save_to_temp(&video, &format!("{chat_id}_{message_id}")) {
+    match tiktok::download(url, &format!("{chat_id}_{message_id}")).await {
         Ok(path) => println!("saved tiktok video for chat {chat_id} message {message_id} to {}", path.display()),
-        Err(err) => eprintln!("failed to save tiktok video for chat {chat_id} message {message_id}: {err}"),
+        Err(err) => eprintln!("failed to download tiktok video for chat {chat_id} message {message_id}: {err}"),
     }
 }
