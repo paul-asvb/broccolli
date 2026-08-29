@@ -47,7 +47,7 @@ pub async fn run() {
                     .await;
 
                     if classification.category == "tiktok_video" {
-                        download_tiktok(chat_id, message_id, &target).await;
+                        download_tiktok(&client, chat_id, message_id, &target).await;
                     }
 
                     db::mark_processing_done(&conn, chat_id, message_id).await;
@@ -61,10 +61,10 @@ pub async fn run() {
     }
 }
 
-/// Downloads and stashes a classified TikTok video in a temp dir, on a best-effort
-/// basis. A failure here doesn't fail the message's processing state — the
-/// classification itself already succeeded.
-async fn download_tiktok(chat_id: i64, message_id: i64, target: &db::Message) {
+/// Downloads the video and fetches its metadata for a classified TikTok message,
+/// stashing both in a temp dir, on a best-effort basis. A failure here doesn't fail
+/// the message's processing state — the classification itself already succeeded.
+async fn download_tiktok(client: &reqwest::Client, chat_id: i64, message_id: i64, target: &db::Message) {
     let Some(url) = target.text.as_deref().and_then(tiktok::find_url) else {
         eprintln!("tiktok_video classification for chat {chat_id} message {message_id} but no tiktok.com URL found in text");
         return;
@@ -73,5 +73,13 @@ async fn download_tiktok(chat_id: i64, message_id: i64, target: &db::Message) {
     match tiktok::download(url, &format!("{chat_id}_{message_id}")).await {
         Ok(path) => println!("saved tiktok video for chat {chat_id} message {message_id} to {}", path.display()),
         Err(err) => eprintln!("failed to download tiktok video for chat {chat_id} message {message_id}: {err}"),
+    }
+
+    match tiktok::fetch_metadata(client, url).await {
+        Ok(metadata) => match tiktok::save_metadata_to_temp(&metadata, &format!("{chat_id}_{message_id}")) {
+            Ok(path) => println!("saved tiktok metadata for chat {chat_id} message {message_id} to {}", path.display()),
+            Err(err) => eprintln!("failed to save tiktok metadata for chat {chat_id} message {message_id}: {err}"),
+        },
+        Err(err) => eprintln!("failed to fetch tiktok metadata for chat {chat_id} message {message_id}: {err}"),
     }
 }
