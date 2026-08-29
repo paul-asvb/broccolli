@@ -111,6 +111,92 @@ pub fn save_metadata_to_temp(metadata: &Value, name: &str) -> Result<PathBuf, St
     Ok(path)
 }
 
+/// Percentage-of-duration marks at which to capture screenshots.
+const SCREENSHOT_PERCENTS: [u32; 19] = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95];
+
+/// Reads a video's duration (in seconds) via `ffprobe`.
+async fn video_duration_secs(video_path: &std::path::Path) -> Result<f64, String> {
+    let output = Command::new("ffprobe")
+        .arg("-v")
+        .arg("error")
+        .arg("-show_entries")
+        .arg("format=duration")
+        .arg("-of")
+        .arg("csv=p=0")
+        .arg(video_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("failed to spawn ffprobe (is it installed and on $PATH?): {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobe exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<f64>()
+        .map_err(|e| format!("failed to parse ffprobe duration output: {e}"))
+}
+
+/// Captures a screenshot every 5% of a video's length (at 5%, 10%, ..., 95%) via
+/// `ffmpeg`, saving them to `$TMPDIR/broccolli-tiktok/<name>_<percent>.jpg` and
+/// returning the resulting paths in ascending percent order.
+pub async fn capture_screenshots(video_path: &std::path::Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    let duration = video_duration_secs(video_path).await?;
+    let dir = std::env::temp_dir().join(TEMP_SUBDIR);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create temp dir: {e}"))?;
+
+    let mut paths = Vec::with_capacity(SCREENSHOT_PERCENTS.len());
+    for percent in SCREENSHOT_PERCENTS {
+        let timestamp = duration * percent as f64 / 100.0;
+        let path = dir.join(format!("{name}_{percent:02}.jpg"));
+
+        let output = Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-ss")
+            .arg(format!("{timestamp:.3}"))
+            .arg("-i")
+            .arg(video_path)
+            .arg("-frames:v")
+            .arg("1")
+            .arg("-q:v")
+            .arg("2")
+            .arg(&path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| format!("failed to spawn ffmpeg (is it installed and on $PATH?): {e}"))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "ffmpeg exited with {} while capturing {percent}% screenshot: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+
+        if !path.exists() {
+            return Err(format!(
+                "ffmpeg reported success but {} does not exist",
+                path.display()
+            ));
+        }
+
+        paths.push(path);
+    }
+
+    log::debug!("captured {} screenshots for {}", paths.len(), video_path.display());
+
+    Ok(paths)
+}
+
 /// Finds the first TikTok URL in free-form message text.
 pub fn find_url(text: &str) -> Option<&str> {
     let found = text.split_whitespace().find(|token| token.contains("tiktok.com"));
@@ -161,6 +247,31 @@ mod tests {
         std::fs::write(&dest, serde_json::to_vec_pretty(&metadata).unwrap()).expect("failed to write metadata");
 
         println!("fetched tiktok metadata for inspection: {}", dest.display());
+    }
+
+    #[tokio::test]
+    #[ignore = "hits the live TikTok CDN via yt-dlp and shells out to ffmpeg; leaves results in tmp/ for manual inspection"]
+    async fn captures_screenshots_of_a_real_video() {
+        let downloaded = download("https://vm.tiktok.com/ZGdxtAF4f/", "unit-test-screenshots")
+            .await
+            .expect("download failed");
+
+        let screenshots = capture_screenshots(&downloaded, "unit-test-screenshots")
+            .await
+            .expect("screenshot capture failed");
+
+        assert_eq!(screenshots.len(), SCREENSHOT_PERCENTS.len());
+
+        let repo_tmp = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tmp");
+        std::fs::create_dir_all(&repo_tmp).expect("failed to create repo tmp dir");
+        for shot in &screenshots {
+            let metadata = std::fs::metadata(shot).expect("screenshot file missing");
+            assert!(metadata.len() > 0);
+            let dest = repo_tmp.join(shot.file_name().unwrap());
+            std::fs::copy(shot, &dest).expect("failed to copy screenshot into repo tmp dir");
+        }
+
+        println!("captured {} tiktok screenshots for inspection in {}", screenshots.len(), repo_tmp.display());
     }
 
     #[test]

@@ -71,7 +71,17 @@ async fn download_tiktok(client: &reqwest::Client, chat_id: i64, message_id: i64
     };
 
     match tiktok::download(url, &format!("{chat_id}_{message_id}")).await {
-        Ok(path) => println!("saved tiktok video for chat {chat_id} message {message_id} to {}", path.display()),
+        Ok(path) => {
+            println!("saved tiktok video for chat {chat_id} message {message_id} to {}", path.display());
+
+            match tiktok::capture_screenshots(&path, &format!("{chat_id}_{message_id}")).await {
+                Ok(paths) => println!(
+                    "captured {} tiktok screenshots for chat {chat_id} message {message_id}",
+                    paths.len()
+                ),
+                Err(err) => eprintln!("failed to capture tiktok screenshots for chat {chat_id} message {message_id}: {err}"),
+            }
+        }
         Err(err) => eprintln!("failed to download tiktok video for chat {chat_id} message {message_id}: {err}"),
     }
 
