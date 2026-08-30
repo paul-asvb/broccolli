@@ -13,6 +13,8 @@ pub struct UpdatesQuery {
 pub async fn updates(
     Query(params): Query<UpdatesQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    log::debug!("polling telegram getUpdates: offset={:?} timeout={:?}", params.offset, params.timeout);
+
     let token = std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -30,15 +32,22 @@ pub async fn updates(
         .query(&query)
         .send()
         .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("telegram request failed: {e}")))?
+        .map_err(|e| {
+            log::error!("telegram getUpdates request failed: {e}");
+            (StatusCode::BAD_GATEWAY, format!("telegram request failed: {e}"))
+        })?
         .json::<Value>()
         .await
         .map_err(|e| {
+            log::error!("failed to parse telegram getUpdates response: {e}");
             (
                 StatusCode::BAD_GATEWAY,
                 format!("failed to parse telegram response: {e}"),
             )
         })?;
+
+    let update_count = resp["result"].as_array().map_or(0, |a| a.len());
+    log::debug!("received {update_count} update(s) from telegram");
 
     Ok(Json(resp))
 }
@@ -104,9 +113,11 @@ fn bot_message_to_export(message: &Value) -> Option<(i64, Value)> {
 /// `X-Telegram-Bot-Api-Secret-Token` header against `TELEGRAM_WEBHOOK_SECRET` before
 /// mapping the message into `messages` via `db::insert_messages`.
 pub async fn webhook(headers: HeaderMap, Json(update): Json<Value>) -> StatusCode {
+    log::debug!("received telegram webhook update {:?}", update["update_id"]);
+
     let expected_secret = std::env::var("TELEGRAM_WEBHOOK_SECRET").unwrap_or_default();
     if expected_secret.is_empty() {
-        eprintln!("TELEGRAM_WEBHOOK_SECRET not set; rejecting webhook request");
+        log::error!("TELEGRAM_WEBHOOK_SECRET not set; rejecting webhook request");
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
 
@@ -116,21 +127,24 @@ pub async fn webhook(headers: HeaderMap, Json(update): Json<Value>) -> StatusCod
         .unwrap_or("");
 
     if !crate::constant_time_eq(provided.as_bytes(), expected_secret.as_bytes()) {
+        log::warn!("webhook request had an invalid or missing secret token");
         return StatusCode::UNAUTHORIZED;
     }
 
     let Some(message) = update.get("message").or_else(|| update.get("edited_message")) else {
         // updates we don't care about yet (channel posts, callback queries, ...) - ack anyway
+        log::debug!("ignoring webhook update with no message/edited_message field");
         return StatusCode::OK;
     };
 
     let Some((chat_id, export)) = bot_message_to_export(message) else {
-        eprintln!("webhook update missing required fields: {update}");
+        log::warn!("webhook update missing required fields: {update}");
         return StatusCode::OK;
     };
 
     let conn = broccolli::db::connect().await;
     broccolli::db::insert_messages(&conn, chat_id, &[export]).await;
+    log::debug!("processed webhook message for chat {chat_id}");
 
     StatusCode::OK
 }

@@ -20,7 +20,9 @@ pub async fn connect() -> Connection {
         .build()
         .await
         .expect("failed to connect to turso");
-    db.connect().expect("failed to open connection")
+    let conn = db.connect().expect("failed to open connection");
+    log::debug!("connected to turso database");
+    conn
 }
 
 pub async fn ensure_schema(conn: &Connection) {
@@ -119,6 +121,8 @@ pub async fn ensure_schema(conn: &Connection) {
     )
     .await
     .expect("failed to create tiktok_analyses message index");
+
+    log::debug!("ensured database schema");
 }
 
 pub async fn table_info(conn: &Connection) -> Vec<(String, String)> {
@@ -662,6 +666,8 @@ pub async fn insert_messages(conn: &Connection, chat_id: i64, messages: &[Value]
     conn.execute("COMMIT", ())
         .await
         .expect("failed to commit transaction");
+
+    log::debug!("inserted {inserted} of {} message(s) into chat {chat_id}", messages.len());
 
     inserted
 }

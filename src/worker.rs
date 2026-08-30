@@ -20,22 +20,34 @@ pub async fn run() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_POLL_INTERVAL_SECS);
 
+    log::debug!("worker started: model={model} vision_model={vision_model} poll_interval={poll_interval}s");
+
     loop {
         let pending = db::claim_pending(&conn, BATCH_SIZE).await;
         if pending.is_empty() {
+            log::debug!("no pending messages, sleeping {poll_interval}s");
             tokio::time::sleep(Duration::from_secs(poll_interval)).await;
             continue;
         }
 
+        log::debug!("claimed {} pending message(s)", pending.len());
+
         for (chat_id, message_id) in pending {
             let (target, context) = db::message_context(&conn, chat_id, message_id, CONTEXT_SIZE).await;
             let Some(target) = target else {
+                log::warn!("claimed processing_state for chat {chat_id} message {message_id} but message not found");
                 db::mark_processing_error(&conn, chat_id, message_id, "message not found").await;
                 continue;
             };
 
             match llm::classify(&client, &model, &context, &target).await {
                 Ok((classification, raw)) => {
+                    log::debug!(
+                        "classified chat {chat_id} message {message_id} as {} (needs_followup={})",
+                        classification.category,
+                        classification.needs_followup
+                    );
+
                     db::insert_analysis(
                         &conn,
                         chat_id,
@@ -55,7 +67,7 @@ pub async fn run() {
                     db::mark_processing_done(&conn, chat_id, message_id).await;
                 }
                 Err(err) => {
-                    eprintln!("analysis failed for chat {chat_id} message {message_id}: {err}");
+                    log::error!("analysis failed for chat {chat_id} message {message_id}: {err}");
                     db::mark_processing_error(&conn, chat_id, message_id, &err).await;
                 }
             }
@@ -75,17 +87,17 @@ async fn download_tiktok(
     target: &db::Message,
 ) {
     let Some(url) = target.text.as_deref().and_then(tiktok::find_url) else {
-        eprintln!("tiktok_video classification for chat {chat_id} message {message_id} but no tiktok.com URL found in text");
+        log::warn!("tiktok_video classification for chat {chat_id} message {message_id} but no tiktok.com URL found in text");
         return;
     };
 
     match tiktok::download(url, &format!("{chat_id}_{message_id}")).await {
         Ok(path) => {
-            println!("saved tiktok video for chat {chat_id} message {message_id} to {}", path.display());
+            log::debug!("saved tiktok video for chat {chat_id} message {message_id} to {}", path.display());
 
             match tiktok::capture_screenshots(&path, &format!("{chat_id}_{message_id}")).await {
                 Ok(paths) => {
-                    println!(
+                    log::debug!(
                         "captured {} tiktok screenshots for chat {chat_id} message {message_id}",
                         paths.len()
                     );
@@ -102,24 +114,24 @@ async fn download_tiktok(
                                 vision_model,
                             )
                             .await;
-                            println!("saved tiktok screenshot analysis for chat {chat_id} message {message_id}");
+                            log::debug!("saved tiktok screenshot analysis for chat {chat_id} message {message_id}");
                         }
-                        Err(err) => eprintln!(
+                        Err(err) => log::error!(
                             "failed to analyze tiktok screenshots for chat {chat_id} message {message_id}: {err}"
                         ),
                     }
                 }
-                Err(err) => eprintln!("failed to capture tiktok screenshots for chat {chat_id} message {message_id}: {err}"),
+                Err(err) => log::error!("failed to capture tiktok screenshots for chat {chat_id} message {message_id}: {err}"),
             }
         }
-        Err(err) => eprintln!("failed to download tiktok video for chat {chat_id} message {message_id}: {err}"),
+        Err(err) => log::error!("failed to download tiktok video for chat {chat_id} message {message_id}: {err}"),
     }
 
     match tiktok::fetch_metadata(client, url).await {
         Ok(metadata) => match tiktok::save_metadata_to_temp(&metadata, &format!("{chat_id}_{message_id}")) {
-            Ok(path) => println!("saved tiktok metadata for chat {chat_id} message {message_id} to {}", path.display()),
-            Err(err) => eprintln!("failed to save tiktok metadata for chat {chat_id} message {message_id}: {err}"),
+            Ok(path) => log::debug!("saved tiktok metadata for chat {chat_id} message {message_id} to {}", path.display()),
+            Err(err) => log::error!("failed to save tiktok metadata for chat {chat_id} message {message_id}: {err}"),
         },
-        Err(err) => eprintln!("failed to fetch tiktok metadata for chat {chat_id} message {message_id}: {err}"),
+        Err(err) => log::error!("failed to fetch tiktok metadata for chat {chat_id} message {message_id}: {err}"),
     }
 }

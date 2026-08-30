@@ -78,12 +78,15 @@ async fn basic_auth(req: Request, next: Next) -> Response {
     let expected_user = std::env::var("BASIC_AUTH_USER").unwrap_or_default();
     let expected_pass = std::env::var("BASIC_AUTH_PASS").unwrap_or_default();
     if expected_user.is_empty() || expected_pass.is_empty() {
+        log::error!("BASIC_AUTH_USER / BASIC_AUTH_PASS not set");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             "BASIC_AUTH_USER / BASIC_AUTH_PASS not set",
         )
             .into_response();
     }
+
+    let path = req.uri().path().to_string();
 
     let Some(credentials) = req
         .headers()
@@ -93,10 +96,12 @@ async fn basic_auth(req: Request, next: Next) -> Response {
         .and_then(|encoded| base64::engine::general_purpose::STANDARD.decode(encoded).ok())
         .and_then(|decoded| String::from_utf8(decoded).ok())
     else {
+        log::warn!("unauthorized request to {path}: missing or malformed credentials");
         return unauthorized();
     };
 
     let Some((user, pass)) = credentials.split_once(':') else {
+        log::warn!("unauthorized request to {path}: malformed credentials");
         return unauthorized();
     };
 
@@ -105,6 +110,7 @@ async fn basic_auth(req: Request, next: Next) -> Response {
     {
         next.run(req).await
     } else {
+        log::warn!("unauthorized request to {path}: bad credentials");
         unauthorized()
     }
 }
@@ -135,6 +141,7 @@ async fn main() {
         .route("/telegram/webhook", post(telegram::webhook))
         .merge(protected);
 
+    log::debug!("spawning background worker");
     tokio::spawn(worker::run());
 
     let port: u16 = std::env::var("PORT")
@@ -143,7 +150,7 @@ async fn main() {
         .unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    println!("listening on {addr}");
+    log::info!("listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
