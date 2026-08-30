@@ -1,3 +1,4 @@
+use crate::linkify::linkify;
 use gloo_net::http::Request;
 use js_sys::Date;
 use serde::Deserialize;
@@ -128,7 +129,7 @@ pub fn message_detail_page(props: &Props) -> Html {
                     { " — " }
                     { message.from_name.unwrap_or_else(|| "?".to_string()) }
                 </p>
-                <p class="mt-2 whitespace-pre-wrap text-gray-800">{ message.text.unwrap_or_default() }</p>
+                <p class="mt-2 whitespace-pre-wrap text-gray-800">{ linkify(message.text.as_deref().unwrap_or_default()) }</p>
             </div>
 
             <button

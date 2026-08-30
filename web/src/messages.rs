@@ -1,3 +1,4 @@
+use crate::linkify::linkify;
 use gloo_net::http::Request;
 use js_sys::Date;
 use serde::Deserialize;
@@ -185,7 +186,9 @@ pub fn messages_page() -> Html {
                                             html! {}
                                         } }
                                     </td>
-                                    <td class="max-w-md px-4 py-2 align-top text-gray-700">{ m.text.clone().unwrap_or_default() }</td>
+                                    <td class="max-w-md px-4 py-2 align-top text-gray-700">
+                                        { linkify(m.text.as_deref().unwrap_or_default()) }
+                                    </td>
                                     <td class="max-w-xs px-4 py-2 align-top text-gray-500">{ m.short_summary.clone().unwrap_or_default() }</td>
                                     <td class="px-4 py-2 align-top text-right">
                                         <button

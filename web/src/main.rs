@@ -1,4 +1,5 @@
 mod header;
+mod linkify;
 mod login;
 mod message_detail;
 mod messages;
