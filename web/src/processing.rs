@@ -32,8 +32,16 @@ struct RecentAnalysis {
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
+struct ProcessingEntry {
+    chat_id: i64,
+    message_id: i64,
+    updated_at: i64,
+}
+
+#[derive(Deserialize, Clone, PartialEq)]
 struct ProcessingSummary {
     counts: Vec<StatusCount>,
+    currently_processing: Vec<ProcessingEntry>,
     recent_errors: Vec<ErrorEntry>,
     recent_processed: Vec<RecentAnalysis>,
 }
@@ -111,6 +119,28 @@ pub fn processing_page() -> Html {
                         </span>
                     }) }
                 </div>
+            </div>
+
+            <div class={section_class}>
+                <h3 class={heading_class}>{ "Currently processing" }</h3>
+                { if data.currently_processing.is_empty() {
+                    html! { <p class="text-sm text-gray-500">{ "nothing processing right now" }</p> }
+                } else {
+                    html! {
+                        <ul>
+                            { for data.currently_processing.iter().map(|p| html! {
+                                <li class={list_item_class}>
+                                    <a href={format!("/messages/{}/{}", p.chat_id, p.message_id)} class={link_class}>
+                                        { format!("chat {} message {}", p.chat_id, p.message_id) }
+                                    </a>
+                                    <span class="text-gray-500">
+                                        { format!(" — started: {}", format_date(p.updated_at)) }
+                                    </span>
+                                </li>
+                            }) }
+                        </ul>
+                    }
+                } }
             </div>
 
             <div class={section_class}>

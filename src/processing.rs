@@ -61,6 +61,7 @@ pub async fn enqueue(
 #[derive(Serialize)]
 pub struct ProcessingSummary {
     counts: Vec<db::StatusCount>,
+    currently_processing: Vec<db::ProcessingEntry>,
     recent_errors: Vec<db::ErrorEntry>,
     recent_processed: Vec<db::RecentAnalysis>,
 }
@@ -69,11 +70,13 @@ pub async fn summary() -> Json<ProcessingSummary> {
     log::debug!("fetching processing summary");
     let conn = db::connect().await;
     let counts = db::processing_status_counts(&conn).await;
+    let currently_processing = db::currently_processing(&conn, 20).await;
     let recent_errors = db::recent_errors(&conn, 20).await;
     let recent_processed = db::recent_analyses(&conn, 20).await;
 
     Json(ProcessingSummary {
         counts,
+        currently_processing,
         recent_errors,
         recent_processed,
     })

@@ -61,6 +61,36 @@ pub fn messages_page() -> Html {
         });
     }
 
+    let processing_page = use_state(|| false);
+
+    let process_page = {
+        let data = data.clone();
+        let processing_page = processing_page.clone();
+        Callback::from(move |_| {
+            let Some(current) = (*data).clone() else {
+                return;
+            };
+            let data = data.clone();
+            let processing_page = processing_page.clone();
+            let targets: Vec<(i64, i64)> = current.messages.iter().map(|m| (m.chat_id, m.message_id)).collect();
+            processing_page.set(true);
+            wasm_bindgen_futures::spawn_local(async move {
+                for (chat_id, message_id) in targets {
+                    let url = format!("/api/messages/{chat_id}/{message_id}/process");
+                    let _ = Request::post(&url).send().await;
+                }
+
+                let refresh_url = format!("/api/messages?page={page}&per_page={per_page}");
+                if let Ok(resp) = Request::get(&refresh_url).send().await {
+                    if let Ok(parsed) = resp.json::<MessagesResponse>().await {
+                        data.set(Some(parsed));
+                    }
+                }
+                processing_page.set(false);
+            });
+        })
+    };
+
     let delete_message = {
         let data = data.clone();
         Callback::from(move |(chat_id, message_id): (i64, i64)| {
@@ -103,9 +133,18 @@ pub fn messages_page() -> Html {
 
     html! {
         <div>
-            <h2 class="mb-4 text-lg font-semibold text-gray-900">
-                { format!("Messages — page {} of {} ({} total)", data.page, total_pages, data.total) }
-            </h2>
+            <div class="mb-4 flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900">
+                    { format!("Messages — page {} of {} ({} total)", data.page, total_pages, data.total) }
+                </h2>
+                <button
+                    onclick={process_page}
+                    disabled={*processing_page}
+                    class="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+                >
+                    { if *processing_page { "processing..." } else { "Process page" } }
+                </button>
+            </div>
             <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
                 <table class="w-full text-left text-sm">
                     <thead class="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">

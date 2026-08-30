@@ -734,6 +734,34 @@ pub async fn recent_errors(conn: &Connection, limit: i64) -> Vec<ErrorEntry> {
     errors
 }
 
+#[derive(Serialize)]
+pub struct ProcessingEntry {
+    pub chat_id: i64,
+    pub message_id: i64,
+    pub updated_at: i64,
+}
+
+pub async fn currently_processing(conn: &Connection, limit: i64) -> Vec<ProcessingEntry> {
+    let mut rows = conn
+        .query(
+            "SELECT chat_id, message_id, updated_at FROM processing_state
+             WHERE status = 'processing' ORDER BY updated_at DESC LIMIT ?1",
+            params![limit],
+        )
+        .await
+        .expect("failed to query currently processing");
+
+    let mut processing = Vec::new();
+    while let Some(row) = rows.next().await.unwrap() {
+        processing.push(ProcessingEntry {
+            chat_id: row.get(0).unwrap(),
+            message_id: row.get(1).unwrap(),
+            updated_at: row.get(2).unwrap(),
+        });
+    }
+    processing
+}
+
 fn flatten_text(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
