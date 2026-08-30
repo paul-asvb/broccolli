@@ -59,6 +59,26 @@ pub fn messages_page() -> Html {
         });
     }
 
+    let delete_message = {
+        let data = data.clone();
+        Callback::from(move |(chat_id, message_id): (i64, i64)| {
+            let data = data.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let url = format!("/api/messages/{chat_id}/{message_id}");
+                if let Ok(resp) = Request::delete(&url).send().await
+                    && resp.ok()
+                    && let Some(mut current) = (*data).clone()
+                {
+                    current
+                        .messages
+                        .retain(|m| !(m.chat_id == chat_id && m.message_id == message_id));
+                    current.total = (current.total - 1).max(0);
+                    data.set(Some(current));
+                }
+            });
+        })
+    };
+
     let Some(data) = (*data).clone() else {
         return html! { <p>{ "loading..." }</p> };
     };
@@ -76,14 +96,24 @@ pub fn messages_page() -> Html {
         <div>
             <h2>{ format!("Messages — page {} of {} ({} total)", data.page, total_pages, data.total) }</h2>
             <ul>
-                { for data.messages.iter().map(|m| html! {
-                    <li>
-                        <a href={format!("/messages/{}/{}", m.chat_id, m.message_id)}>
-                            <strong>{ format_date(m.date_unixtime) }</strong>
-                        </a>
-                        { ": " }
-                        { m.text.clone().unwrap_or_default() }
-                    </li>
+                { for data.messages.iter().map(|m| {
+                    let chat_id = m.chat_id;
+                    let message_id = m.message_id;
+                    let onclick = {
+                        let delete_message = delete_message.clone();
+                        Callback::from(move |_| delete_message.emit((chat_id, message_id)))
+                    };
+                    html! {
+                        <li>
+                            <a href={format!("/messages/{}/{}", m.chat_id, m.message_id)}>
+                                <strong>{ format_date(m.date_unixtime) }</strong>
+                            </a>
+                            { ": " }
+                            { m.text.clone().unwrap_or_default() }
+                            { " " }
+                            <button onclick={onclick}>{ "Delete" }</button>
+                        </li>
+                    }
                 }) }
             </ul>
             <p>

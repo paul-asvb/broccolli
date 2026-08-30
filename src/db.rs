@@ -39,12 +39,25 @@ pub async fn ensure_schema(conn: &Connection) {
             media_type TEXT,
             file_name TEXT,
             raw_json TEXT NOT NULL,
+            deleted INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (chat_id, message_id)
         )",
         (),
     )
     .await
     .expect("failed to create messages table");
+
+    // messages predates the `deleted` column, so existing databases need it backfilled.
+    let has_deleted_column = table_info(conn).await.iter().any(|(name, _)| name == "deleted");
+    if !has_deleted_column {
+        conn.execute(
+            "ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
+            (),
+        )
+        .await
+        .expect("failed to add deleted column");
+        log::info!("added deleted column to messages table");
+    }
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS messages_date_idx ON messages (date_unixtime)",
@@ -142,7 +155,7 @@ pub async fn table_info(conn: &Connection) -> Vec<(String, String)> {
 
 pub async fn count_messages(conn: &Connection) -> i64 {
     let mut rows = conn
-        .query("SELECT COUNT(*) FROM messages", ())
+        .query("SELECT COUNT(*) FROM messages WHERE deleted = 0", ())
         .await
         .expect("failed to count");
     let row = rows.next().await.unwrap().unwrap();
@@ -210,7 +223,7 @@ pub async fn list_messages(conn: &Connection, page: i64, per_page: i64) -> Vec<M
     let offset = (page.max(1) - 1) * per_page;
     let mut rows = conn
         .query(
-            "SELECT chat_id, message_id, date_unixtime, from_name, text FROM messages ORDER BY date_unixtime DESC LIMIT ?1 OFFSET ?2",
+            "SELECT chat_id, message_id, date_unixtime, from_name, text FROM messages WHERE deleted = 0 ORDER BY date_unixtime DESC LIMIT ?1 OFFSET ?2",
             params![per_page, offset],
         )
         .await
@@ -513,6 +526,22 @@ pub async fn enqueue_message(conn: &Connection, chat_id: i64, message_id: i64) -
     .expect("failed to enqueue message");
 
     true
+}
+
+/// Marks a message as deleted so it's excluded from `list_messages`/`count_messages`.
+/// Returns false if the message doesn't exist.
+pub async fn mark_deleted(conn: &Connection, chat_id: i64, message_id: i64) -> bool {
+    let affected = conn
+        .execute(
+            "UPDATE messages SET deleted = 1 WHERE chat_id = ?1 AND message_id = ?2",
+            params![chat_id, message_id],
+        )
+        .await
+        .expect("failed to mark message deleted");
+
+    log::debug!("marked chat {chat_id} message {message_id} deleted ({affected} row(s) affected)");
+
+    affected > 0
 }
 
 #[derive(Serialize)]

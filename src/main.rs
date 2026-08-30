@@ -125,7 +125,7 @@ async fn main() {
         .route("/api/messages", get(messages::list))
         .route(
             "/api/messages/{chat_id}/{message_id}",
-            get(processing::message_detail),
+            get(processing::message_detail).delete(processing::delete_message),
         )
         .route(
             "/api/messages/{chat_id}/{message_id}/process",

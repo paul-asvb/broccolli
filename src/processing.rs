@@ -28,6 +28,17 @@ pub async fn message_detail(Path((chat_id, message_id)): Path<(i64, i64)>) -> Js
     })
 }
 
+pub async fn delete_message(Path((chat_id, message_id)): Path<(i64, i64)>) -> StatusCode {
+    log::debug!("deleting chat {chat_id} message {message_id}");
+    let conn = db::connect().await;
+    if db::mark_deleted(&conn, chat_id, message_id).await {
+        StatusCode::NO_CONTENT
+    } else {
+        log::warn!("cannot delete chat {chat_id} message {message_id}: not found");
+        StatusCode::NOT_FOUND
+    }
+}
+
 pub async fn enqueue(
     Path((chat_id, message_id)): Path<(i64, i64)>,
 ) -> Result<Json<db::ProcessingState>, StatusCode> {
