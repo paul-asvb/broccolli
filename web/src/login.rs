@@ -73,27 +73,36 @@ pub fn login_page(props: &Props) -> Html {
         })
     };
 
+    let input_class =
+        "w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none";
+
     html! {
-        <div class="login">
-            <h2>{ "Log in" }</h2>
-            <form onsubmit={on_submit}>
-                <p>
-                    <label for="username">{ "Username" }</label><br/>
-                    <input id="username" type="text" value={(*username).clone()} oninput={on_username_input} />
-                </p>
-                <p>
-                    <label for="password">{ "Password" }</label><br/>
-                    <input id="password" type="password" value={(*password).clone()} oninput={on_password_input} />
-                </p>
-                { if let Some(err) = &*error {
-                    html! { <p class="error">{ err }</p> }
-                } else {
-                    html! {}
-                } }
-                <button type="submit" disabled={*submitting}>
-                    { if *submitting { "logging in..." } else { "Log in" } }
-                </button>
-            </form>
+        <div class="flex min-h-screen items-center justify-center bg-gray-50">
+            <div class="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+                <h2 class="mb-4 text-lg font-semibold text-gray-900">{ "Log in" }</h2>
+                <form onsubmit={on_submit} class="space-y-4">
+                    <div>
+                        <label for="username" class="mb-1 block text-sm font-medium text-gray-700">{ "Username" }</label>
+                        <input id="username" type="text" class={input_class} value={(*username).clone()} oninput={on_username_input} />
+                    </div>
+                    <div>
+                        <label for="password" class="mb-1 block text-sm font-medium text-gray-700">{ "Password" }</label>
+                        <input id="password" type="password" class={input_class} value={(*password).clone()} oninput={on_password_input} />
+                    </div>
+                    { if let Some(err) = &*error {
+                        html! { <p class="text-sm text-red-600">{ err }</p> }
+                    } else {
+                        html! {}
+                    } }
+                    <button
+                        type="submit"
+                        disabled={*submitting}
+                        class="w-full rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+                    >
+                        { if *submitting { "logging in..." } else { "Log in" } }
+                    </button>
+                </form>
+            </div>
         </div>
     }
 }

@@ -81,7 +81,7 @@ pub fn messages_page() -> Html {
     };
 
     let Some(data) = (*data).clone() else {
-        return html! { <p>{ "loading..." }</p> };
+        return html! { <p class="text-gray-500">{ "loading..." }</p> };
     };
 
     let total_pages = ((data.total + data.per_page - 1) / data.per_page.max(1)).max(1);
@@ -92,57 +92,70 @@ pub fn messages_page() -> Html {
     );
     let next_href = format!("/messages?page={}&per_page={}", data.page + 1, data.per_page);
     let page_href = |p: i64| format!("/messages?page={}&per_page={}", p, data.per_page);
+    let page_link_class = |active: bool| {
+        if active {
+            "rounded-md bg-gray-900 px-2.5 py-1 text-sm font-medium text-white"
+        } else {
+            "rounded-md px-2.5 py-1 text-sm font-medium text-gray-600 hover:bg-gray-100"
+        }
+    };
 
     html! {
         <div>
-            <h2>{ format!("Messages — page {} of {} ({} total)", data.page, total_pages, data.total) }</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>{ "Date" }</th>
-                        <th>{ "Text" }</th>
-                        <th>{ "Summary" }</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    { for data.messages.iter().map(|m| {
-                        let chat_id = m.chat_id;
-                        let message_id = m.message_id;
-                        let onclick = {
-                            let delete_message = delete_message.clone();
-                            Callback::from(move |_| delete_message.emit((chat_id, message_id)))
-                        };
-                        html! {
-                            <tr>
-                                <td>
-                                    <a href={format!("/messages/{}/{}", m.chat_id, m.message_id)}>
-                                        { format_date(m.date_unixtime) }
-                                    </a>
-                                </td>
-                                <td>{ m.text.clone().unwrap_or_default() }</td>
-                                <td>{ m.short_summary.clone().unwrap_or_default() }</td>
-                                <td><button onclick={onclick}>{ "Delete" }</button></td>
-                            </tr>
-                        }
-                    }) }
-                </tbody>
-            </table>
-            <p>
-                <a href={prev_href}>{ "« prev" }</a>
-                { " " }
+            <h2 class="mb-4 text-lg font-semibold text-gray-900">
+                { format!("Messages — page {} of {} ({} total)", data.page, total_pages, data.total) }
+            </h2>
+            <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                <table class="w-full text-left text-sm">
+                    <thead class="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                        <tr>
+                            <th class="px-4 py-2 font-medium">{ "Date" }</th>
+                            <th class="px-4 py-2 font-medium">{ "Text" }</th>
+                            <th class="px-4 py-2 font-medium">{ "Summary" }</th>
+                            <th class="px-4 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        { for data.messages.iter().map(|m| {
+                            let chat_id = m.chat_id;
+                            let message_id = m.message_id;
+                            let onclick = {
+                                let delete_message = delete_message.clone();
+                                Callback::from(move |_| delete_message.emit((chat_id, message_id)))
+                            };
+                            html! {
+                                <tr class="hover:bg-gray-50">
+                                    <td class="whitespace-nowrap px-4 py-2 align-top">
+                                        <a
+                                            href={format!("/messages/{}/{}", m.chat_id, m.message_id)}
+                                            class="font-medium text-gray-900 hover:underline"
+                                        >
+                                            { format_date(m.date_unixtime) }
+                                        </a>
+                                    </td>
+                                    <td class="max-w-md px-4 py-2 align-top text-gray-700">{ m.text.clone().unwrap_or_default() }</td>
+                                    <td class="max-w-xs px-4 py-2 align-top text-gray-500">{ m.short_summary.clone().unwrap_or_default() }</td>
+                                    <td class="px-4 py-2 align-top text-right">
+                                        <button
+                                            onclick={onclick}
+                                            class="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-red-50 hover:text-red-600"
+                                        >
+                                            { "Delete" }
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        }) }
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-4 flex items-center gap-1">
+                <a href={prev_href} class={page_link_class(false)}>{ "« prev" }</a>
                 { for (1..=total_pages).map(|p| html! {
-                    <>
-                        { if p == data.page {
-                            html! { <strong>{ p }</strong> }
-                        } else {
-                            html! { <a href={page_href(p)}>{ p }</a> }
-                        } }
-                        { " " }
-                    </>
+                    <a href={page_href(p)} class={page_link_class(p == data.page)}>{ p }</a>
                 }) }
-                <a href={next_href}>{ "next »" }</a>
-            </p>
+                <a href={next_href} class={page_link_class(false)}>{ "next »" }</a>
+            </div>
         </div>
     }
 }

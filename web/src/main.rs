@@ -71,7 +71,9 @@ fn app() -> Html {
     }
 
     match *auth {
-        AuthState::Checking => html! { <p>{ "loading..." }</p> },
+        AuthState::Checking => html! {
+            <p class="flex min-h-screen items-center justify-center text-gray-500">{ "loading..." }</p>
+        },
         AuthState::Unauthenticated => {
             let auth = auth.clone();
             let on_success = Callback::from(move |_| auth.set(AuthState::Authenticated));
@@ -80,7 +82,7 @@ fn app() -> Html {
         AuthState::Authenticated => html! {
             <BrowserRouter>
                 <Header />
-                <main>
+                <main class="mx-auto max-w-5xl px-4 py-6">
                     <Switch<Route> render={switch} />
                 </main>
             </BrowserRouter>
