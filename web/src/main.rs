@@ -1,9 +1,12 @@
 mod header;
+mod login;
 mod message_detail;
 mod messages;
 mod processing;
 
+use gloo_net::http::Request;
 use header::Header;
+use login::LoginPage;
 use message_detail::MessageDetailPage;
 use messages::MessagesPage;
 use processing::ProcessingPage;
@@ -37,15 +40,51 @@ fn switch(route: Route) -> Html {
     }
 }
 
+#[derive(Clone, PartialEq)]
+enum AuthState {
+    Checking,
+    Authenticated,
+    Unauthenticated,
+}
+
 #[function_component(App)]
 fn app() -> Html {
-    html! {
-        <BrowserRouter>
-            <Header />
-            <main>
-                <Switch<Route> render={switch} />
-            </main>
-        </BrowserRouter>
+    let auth = use_state(|| AuthState::Checking);
+
+    {
+        let auth = auth.clone();
+        use_effect_with((), move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                let authenticated = Request::get("/api/session")
+                    .send()
+                    .await
+                    .map(|resp| resp.ok())
+                    .unwrap_or(false);
+                auth.set(if authenticated {
+                    AuthState::Authenticated
+                } else {
+                    AuthState::Unauthenticated
+                });
+            });
+            || ()
+        });
+    }
+
+    match *auth {
+        AuthState::Checking => html! { <p>{ "loading..." }</p> },
+        AuthState::Unauthenticated => {
+            let auth = auth.clone();
+            let on_success = Callback::from(move |_| auth.set(AuthState::Authenticated));
+            html! { <LoginPage on_success={on_success} /> }
+        }
+        AuthState::Authenticated => html! {
+            <BrowserRouter>
+                <Header />
+                <main>
+                    <Switch<Route> render={switch} />
+                </main>
+            </BrowserRouter>
+        },
     }
 }
 

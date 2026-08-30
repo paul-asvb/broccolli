@@ -1,18 +1,17 @@
+mod auth;
 mod messages;
 mod processing;
 mod telegram;
 mod worker;
 
-use axum::body::Body;
-use axum::extract::{Path, Request};
+use axum::extract::Path;
 use axum::http::{header, StatusCode};
-use axum::middleware::{self, Next};
-use axum::response::{Html, IntoResponse, Response};
+use axum::middleware;
+use axum::response::{Html, IntoResponse};
 use axum::{
     routing::{get, post},
     Router,
 };
-use base64::Engine;
 use rust_embed::RustEmbed;
 use std::net::SocketAddr;
 
@@ -66,62 +65,14 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-async fn basic_auth(req: Request, next: Next) -> Response {
-    let unauthorized = || {
-        Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header(header::WWW_AUTHENTICATE, r#"Basic realm="broccolli""#)
-            .body(Body::from("unauthorized"))
-            .unwrap()
-    };
-
-    let expected_user = std::env::var("BASIC_AUTH_USER").unwrap_or_default();
-    let expected_pass = std::env::var("BASIC_AUTH_PASS").unwrap_or_default();
-    if expected_user.is_empty() || expected_pass.is_empty() {
-        log::error!("BASIC_AUTH_USER / BASIC_AUTH_PASS not set");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "BASIC_AUTH_USER / BASIC_AUTH_PASS not set",
-        )
-            .into_response();
-    }
-
-    let path = req.uri().path().to_string();
-
-    let Some(credentials) = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Basic "))
-        .and_then(|encoded| base64::engine::general_purpose::STANDARD.decode(encoded).ok())
-        .and_then(|decoded| String::from_utf8(decoded).ok())
-    else {
-        log::warn!("unauthorized request to {path}: missing or malformed credentials");
-        return unauthorized();
-    };
-
-    let Some((user, pass)) = credentials.split_once(':') else {
-        log::warn!("unauthorized request to {path}: malformed credentials");
-        return unauthorized();
-    };
-
-    if constant_time_eq(user.as_bytes(), expected_user.as_bytes())
-        && constant_time_eq(pass.as_bytes(), expected_pass.as_bytes())
-    {
-        next.run(req).await
-    } else {
-        log::warn!("unauthorized request to {path}: bad credentials");
-        unauthorized()
-    }
-}
-
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
     env_logger::init();
 
-    let protected = Router::new()
-        .route("/", get(index))
+    // the compiled frontend shell carries no secrets, so it's served unauthenticated;
+    // only the api routes that actually touch data require a valid session cookie.
+    let protected_api = Router::new()
         .route("/api/messages", get(messages::list))
         .route(
             "/api/messages/{chat_id}/{message_id}",
@@ -132,14 +83,18 @@ async fn main() {
             axum::routing::post(processing::enqueue),
         )
         .route("/api/processing", get(processing::summary))
-        .route("/{*path}", get(web_asset))
-        .route_layer(middleware::from_fn(basic_auth));
+        .route("/api/session", get(auth::session))
+        .route_layer(middleware::from_fn(auth::cookie_auth));
 
     let app = Router::new()
+        .route("/", get(index))
+        .route("/{*path}", get(web_asset))
         .route("/health", get(health))
         .route("/telegram/updates", get(telegram::updates))
         .route("/telegram/webhook", post(telegram::webhook))
-        .merge(protected);
+        .route("/api/login", post(auth::login))
+        .route("/api/logout", post(auth::logout))
+        .merge(protected_api);
 
     log::debug!("spawning background worker");
     tokio::spawn(worker::run());
