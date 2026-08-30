@@ -101,11 +101,10 @@ pub async fn login(Json(body): Json<LoginRequest>) -> Response {
     let Some(secret) = session_secret() else {
         return missing_config("SESSION_SECRET");
     };
-    let expected_user = std::env::var("BASIC_AUTH_USER").unwrap_or_default();
-    let expected_pass = std::env::var("BASIC_AUTH_PASS").unwrap_or_default();
-    if expected_user.is_empty() || expected_pass.is_empty() {
-        return missing_config("BASIC_AUTH_USER / BASIC_AUTH_PASS");
-    }
+    let admin_auth = std::env::var("ADMIN_AUTH").unwrap_or_default();
+    let Some((expected_user, expected_pass)) = admin_auth.split_once(':') else {
+        return missing_config("ADMIN_AUTH (expected user:pass)");
+    };
 
     if crate::constant_time_eq(body.username.as_bytes(), expected_user.as_bytes())
         && crate::constant_time_eq(body.password.as_bytes(), expected_pass.as_bytes())
