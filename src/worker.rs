@@ -1,4 +1,4 @@
-use broccolli::{db, llm, tiktok};
+use broccolli::{db, llm, tiktok, web_article};
 use std::time::Duration;
 
 const BATCH_SIZE: i64 = 5;
@@ -62,6 +62,8 @@ pub async fn run() {
 
                     if classification.category == "tiktok_video" {
                         download_tiktok(&conn, &client, &vision_model, chat_id, message_id, &target).await;
+                    } else if classification.category == "web_article" {
+                        crawl_web_article(&conn, &client, &model, chat_id, message_id, &target).await;
                     }
 
                     db::mark_processing_done(&conn, chat_id, message_id).await;
@@ -134,5 +136,53 @@ async fn download_tiktok(
             Err(err) => log::error!("failed to save tiktok metadata for chat {chat_id} message {message_id}: {err}"),
         },
         Err(err) => log::error!("failed to fetch tiktok metadata for chat {chat_id} message {message_id}: {err}"),
+    }
+}
+
+/// Crawls the linked page via Apify and stores an LLM-generated summary of its content, for a
+/// classified web_article message, on a best-effort basis. A failure here doesn't fail the
+/// message's processing state — the classification itself already succeeded.
+async fn crawl_web_article(
+    conn: &libsql::Connection,
+    client: &reqwest::Client,
+    model: &str,
+    chat_id: i64,
+    message_id: i64,
+    target: &db::Message,
+) {
+    let Some(url) = target.text.as_deref().and_then(web_article::find_url) else {
+        log::warn!("web_article classification for chat {chat_id} message {message_id} but no URL found in text");
+        return;
+    };
+
+    let item = match web_article::crawl(client, url).await {
+        Ok(item) => item,
+        Err(err) => {
+            log::error!("failed to crawl web article for chat {chat_id} message {message_id}: {err}");
+            return;
+        }
+    };
+
+    let Some(body_text) = item["text"].as_str().filter(|t| !t.is_empty()) else {
+        log::warn!("crawled {url} for chat {chat_id} message {message_id} but no text content was returned");
+        return;
+    };
+    let title = item["metadata"]["title"].as_str();
+
+    match llm::summarize_article(client, model, title, body_text).await {
+        Ok((summary, _raw)) => {
+            db::insert_web_article_analysis(
+                conn,
+                chat_id,
+                message_id,
+                url,
+                &summary.summary,
+                &summary.short_summary,
+                model,
+            )
+            .await;
+            log::debug!("saved web article summary for chat {chat_id} message {message_id}");
+        }
+        Err(err) => log::error!("failed to summarize web article for chat {chat_id} message {message_id}: {err}"),
     }
 }

@@ -150,6 +150,29 @@ pub async fn ensure_schema(conn: &Connection) {
     .await
     .expect("failed to create tiktok_analyses message index");
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS web_article_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            url TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            short_summary TEXT NOT NULL,
+            model TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )",
+        (),
+    )
+    .await
+    .expect("failed to create web_article_analyses table");
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS web_article_analyses_message_idx ON web_article_analyses (chat_id, message_id)",
+        (),
+    )
+    .await
+    .expect("failed to create web_article_analyses message index");
+
     log::debug!("ensured database schema");
 }
 
@@ -219,6 +242,7 @@ pub struct Message {
     pub from_name: Option<String>,
     pub text: Option<String>,
     pub short_summary: Option<String>,
+    pub category: Option<String>,
 }
 
 pub async fn get_message(conn: &Connection, chat_id: i64, message_id: i64) -> Option<Message> {
@@ -237,20 +261,27 @@ pub async fn get_message(conn: &Connection, chat_id: i64, message_id: i64) -> Op
         from_name: row.get(3).unwrap(),
         text: row.get(4).unwrap(),
         short_summary: None,
+        category: None,
     })
 }
 
-/// Latest tiktok short summary per message, correlated by (chat_id, message_id). Other analysis
-/// kinds can be added to this subquery (e.g. via COALESCE) as they grow their own short summaries.
-const SHORT_SUMMARY_SUBQUERY: &str = "(SELECT short_summary FROM tiktok_analyses ta \
-     WHERE ta.chat_id = m.chat_id AND ta.message_id = m.message_id ORDER BY created_at DESC LIMIT 1)";
+/// Latest short summary per message across all analysis kinds that produce one, correlated by
+/// (chat_id, message_id). Add further analysis kinds to the COALESCE as they grow short summaries.
+const SHORT_SUMMARY_SUBQUERY: &str = "COALESCE(
+     (SELECT short_summary FROM tiktok_analyses ta WHERE ta.chat_id = m.chat_id AND ta.message_id = m.message_id ORDER BY created_at DESC LIMIT 1),
+     (SELECT short_summary FROM web_article_analyses wa WHERE wa.chat_id = m.chat_id AND wa.message_id = m.message_id ORDER BY created_at DESC LIMIT 1)
+     )";
+
+/// Latest classification category per message, correlated by (chat_id, message_id).
+const CATEGORY_SUBQUERY: &str = "(SELECT category FROM analyses an \
+     WHERE an.chat_id = m.chat_id AND an.message_id = m.message_id ORDER BY created_at DESC LIMIT 1)";
 
 pub async fn list_messages(conn: &Connection, page: i64, per_page: i64) -> Vec<Message> {
     let offset = (page.max(1) - 1) * per_page;
     let mut rows = conn
         .query(
             &format!(
-                "SELECT m.chat_id, m.message_id, m.date_unixtime, m.from_name, m.text, {SHORT_SUMMARY_SUBQUERY}
+                "SELECT m.chat_id, m.message_id, m.date_unixtime, m.from_name, m.text, {SHORT_SUMMARY_SUBQUERY}, {CATEGORY_SUBQUERY}
                  FROM messages m WHERE m.deleted = 0 ORDER BY m.date_unixtime DESC LIMIT ?1 OFFSET ?2"
             ),
             params![per_page, offset],
@@ -267,6 +298,7 @@ pub async fn list_messages(conn: &Connection, page: i64, per_page: i64) -> Vec<M
             from_name: row.get(3).unwrap(),
             text: row.get(4).unwrap(),
             short_summary: row.get(5).unwrap(),
+            category: row.get(6).unwrap(),
         });
     }
     messages
@@ -324,6 +356,7 @@ pub async fn message_context(
         from_name: row.get(3).unwrap(),
         text: row.get(4).unwrap(),
         short_summary: None,
+        category: None,
     });
 
     let mut ctx_rows = conn
@@ -344,6 +377,7 @@ pub async fn message_context(
             from_name: row.get(3).unwrap(),
             text: row.get(4).unwrap(),
             short_summary: None,
+            category: None,
         });
     }
     context.reverse();
@@ -431,6 +465,56 @@ pub async fn get_latest_tiktok_analysis(conn: &Connection, chat_id: i64, message
             model: row.get(4).unwrap(),
             created_at: row.get(5).unwrap(),
         }
+    })
+}
+
+pub async fn insert_web_article_analysis(
+    conn: &Connection,
+    chat_id: i64,
+    message_id: i64,
+    url: &str,
+    summary: &str,
+    short_summary: &str,
+    model: &str,
+) {
+    conn.execute(
+        "INSERT INTO web_article_analyses (chat_id, message_id, url, summary, short_summary, model, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![chat_id, message_id, url, summary, short_summary, model, now_unix()],
+    )
+    .await
+    .expect("failed to insert web article analysis");
+}
+
+#[derive(Serialize)]
+pub struct WebArticleAnalysis {
+    pub url: String,
+    pub summary: String,
+    pub short_summary: String,
+    pub model: String,
+    pub created_at: i64,
+}
+
+pub async fn get_latest_web_article_analysis(
+    conn: &Connection,
+    chat_id: i64,
+    message_id: i64,
+) -> Option<WebArticleAnalysis> {
+    let mut rows = conn
+        .query(
+            "SELECT url, summary, short_summary, model, created_at FROM web_article_analyses
+             WHERE chat_id = ?1 AND message_id = ?2 ORDER BY created_at DESC LIMIT 1",
+            params![chat_id, message_id],
+        )
+        .await
+        .expect("failed to query web_article_analyses");
+
+    rows.next().await.unwrap().map(|row| WebArticleAnalysis {
+        url: row.get(0).unwrap(),
+        summary: row.get(1).unwrap(),
+        short_summary: row.get(2).unwrap(),
+        model: row.get(3).unwrap(),
+        created_at: row.get(4).unwrap(),
     })
 }
 

@@ -128,6 +128,75 @@ pub async fn classify(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleSummary {
+    pub summary: String,
+    pub short_summary: String,
+}
+
+/// Caps how much crawled page text is sent to the model, to keep the request reasonably sized.
+const MAX_ARTICLE_CHARS: usize = 12_000;
+
+/// Summarizes crawled web article text via a text-capable OpenRouter model.
+pub async fn summarize_article(
+    client: &reqwest::Client,
+    model: &str,
+    title: Option<&str>,
+    body_text: &str,
+) -> Result<(ArticleSummary, String), String> {
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .map_err(|_| "OPENROUTER_API_KEY not set".to_string())?;
+
+    let truncated: String = body_text.chars().take(MAX_ARTICLE_CHARS).collect();
+    log::debug!(
+        "summarizing article with model {model} ({} of {} chars used)",
+        truncated.len(),
+        body_text.len()
+    );
+
+    let title_line = title.map(|t| format!("Title: {t}\n")).unwrap_or_default();
+    let prompt = format!(
+        "{title_line}The following is the crawled text content of a webpage. Write a concise summary of \
+         what it says, plus a short_summary: a single sentence, under 100 characters, suitable for a table \
+         column. Respond with ONLY a JSON object of the form \
+         {{\"summary\": string, \"short_summary\": string}}, no other text.\n\nContent:\n{truncated}"
+    );
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "response_format": {"type": "json_object"},
+    });
+
+    let resp = client
+        .post(OPENROUTER_URL)
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("openrouter request failed: {e}"))?;
+
+    let raw: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("failed to parse openrouter response: {e}"))?;
+
+    log::debug!("openrouter article-summary raw response: {raw}");
+
+    let response_text = raw["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| format!("unexpected openrouter response shape: {raw}"))?;
+
+    let analysis: ArticleSummary = serde_json::from_str(response_text)
+        .map_err(|e| format!("failed to parse article summary json ({response_text}): {e}"))?;
+
+    log::debug!("article summary: short_summary={}", analysis.short_summary);
+
+    Ok((analysis, raw.to_string()))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenshotAnalysis {
     pub summary: String,
     pub short_summary: String,

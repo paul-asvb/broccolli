@@ -43,12 +43,21 @@ struct TiktokAnalysis {
     created_at: i64,
 }
 
+#[derive(Deserialize, Clone, PartialEq)]
+struct WebArticleAnalysis {
+    url: String,
+    summary: String,
+    model: String,
+    created_at: i64,
+}
+
 #[derive(Deserialize, Clone, PartialEq, Default)]
 struct MessageDetail {
     message: Option<Message>,
     processing: Option<ProcessingState>,
     analysis: Option<Analysis>,
     tiktok_analysis: Option<TiktokAnalysis>,
+    web_article_analysis: Option<WebArticleAnalysis>,
 }
 
 fn format_date(unixtime: i64) -> String {
@@ -184,6 +193,27 @@ pub fn message_detail_page(props: &Props) -> Html {
                         </div>
                     },
                     None => html! { <p class="text-sm text-gray-500">{ "no tiktok summary yet" }</p> },
+                } }
+            </div>
+
+            <div class={section_class}>
+                <h3 class={heading_class}>{ "Web article summary" }</h3>
+                { match data.web_article_analysis {
+                    Some(w) => html! {
+                        <div>
+                            <p class="text-gray-800">{ w.summary }</p>
+                            <ul class={classes!(list_class, "mt-2")}>
+                                <li>
+                                    <a href={w.url.clone()} target="_blank" rel="noopener noreferrer" class="text-gray-900 hover:underline">
+                                        { w.url }
+                                    </a>
+                                </li>
+                                <li>{ format!("model: {}", w.model) }</li>
+                                <li>{ format!("analyzed: {}", format_date(w.created_at)) }</li>
+                            </ul>
+                        </div>
+                    },
+                    None => html! { <p class="text-sm text-gray-500">{ "no web article summary yet" }</p> },
                 } }
             </div>
         </div>

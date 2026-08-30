@@ -10,6 +10,7 @@ pub struct MessageDetail {
     processing: Option<db::ProcessingState>,
     analysis: Option<db::Analysis>,
     tiktok_analysis: Option<db::TiktokAnalysis>,
+    web_article_analysis: Option<db::WebArticleAnalysis>,
 }
 
 pub async fn message_detail(Path((chat_id, message_id)): Path<(i64, i64)>) -> Json<MessageDetail> {
@@ -19,12 +20,14 @@ pub async fn message_detail(Path((chat_id, message_id)): Path<(i64, i64)>) -> Js
     let processing = db::get_processing_state(&conn, chat_id, message_id).await;
     let analysis = db::get_latest_analysis(&conn, chat_id, message_id).await;
     let tiktok_analysis = db::get_latest_tiktok_analysis(&conn, chat_id, message_id).await;
+    let web_article_analysis = db::get_latest_web_article_analysis(&conn, chat_id, message_id).await;
 
     Json(MessageDetail {
         message,
         processing,
         analysis,
         tiktok_analysis,
+        web_article_analysis,
     })
 }
 

@@ -18,6 +18,7 @@ struct Message {
     date_unixtime: i64,
     text: Option<String>,
     short_summary: Option<String>,
+    category: Option<String>,
 }
 
 fn format_date(unixtime: i64) -> String {
@@ -110,6 +111,7 @@ pub fn messages_page() -> Html {
                     <thead class="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                         <tr>
                             <th class="px-4 py-2 font-medium">{ "Date" }</th>
+                            <th class="px-4 py-2 font-medium">{ "Category" }</th>
                             <th class="px-4 py-2 font-medium">{ "Text" }</th>
                             <th class="px-4 py-2 font-medium">{ "Summary" }</th>
                             <th class="px-4 py-2"></th>
@@ -132,6 +134,17 @@ pub fn messages_page() -> Html {
                                         >
                                             { format_date(m.date_unixtime) }
                                         </a>
+                                    </td>
+                                    <td class="whitespace-nowrap px-4 py-2 align-top">
+                                        { if let Some(category) = &m.category {
+                                            html! {
+                                                <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                                                    { category }
+                                                </span>
+                                            }
+                                        } else {
+                                            html! {}
+                                        } }
                                     </td>
                                     <td class="max-w-md px-4 py-2 align-top text-gray-700">{ m.text.clone().unwrap_or_default() }</td>
                                     <td class="max-w-xs px-4 py-2 align-top text-gray-500">{ m.short_summary.clone().unwrap_or_default() }</td>
