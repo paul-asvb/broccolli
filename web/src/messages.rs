@@ -19,14 +19,6 @@ struct Message {
     text: Option<String>,
 }
 
-fn sort_by_date(messages: &mut [Message], ascending: bool) {
-    if ascending {
-        messages.sort_by_key(|m| m.date_unixtime);
-    } else {
-        messages.sort_by_key(|m| std::cmp::Reverse(m.date_unixtime));
-    }
-}
-
 fn format_date(unixtime: i64) -> String {
     let date = Date::new(&JsValue::from_f64((unixtime * 1000) as f64));
     String::from(date.to_locale_string("default", &JsValue::UNDEFINED))
@@ -48,7 +40,6 @@ pub fn messages_page() -> Html {
     let per_page = query.per_page.unwrap_or(50).max(1);
 
     let data = use_state(|| None::<MessagesResponse>);
-    let ascending = use_state(|| true);
 
     {
         let data = data.clone();
@@ -68,14 +59,8 @@ pub fn messages_page() -> Html {
         });
     }
 
-    let Some(mut data) = (*data).clone() else {
+    let Some(data) = (*data).clone() else {
         return html! { <p>{ "loading..." }</p> };
-    };
-    sort_by_date(&mut data.messages, *ascending);
-
-    let toggle_sort = {
-        let ascending = ascending.clone();
-        Callback::from(move |_| ascending.set(!*ascending))
     };
 
     let total_pages = ((data.total + data.per_page - 1) / data.per_page.max(1)).max(1);
@@ -90,9 +75,6 @@ pub fn messages_page() -> Html {
     html! {
         <div>
             <h2>{ format!("Messages — page {} of {} ({} total)", data.page, total_pages, data.total) }</h2>
-            <button onclick={toggle_sort}>
-                { if *ascending { "Sort: oldest first" } else { "Sort: newest first" } }
-            </button>
             <ul>
                 { for data.messages.iter().map(|m| html! {
                     <li>

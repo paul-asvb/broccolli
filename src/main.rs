@@ -8,7 +8,10 @@ use axum::extract::{Path, Request};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
-use axum::{routing::get, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use base64::Engine;
 use rust_embed::RustEmbed;
 use std::net::SocketAddr;
@@ -129,6 +132,7 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/telegram/updates", get(telegram::updates))
+        .route("/telegram/webhook", post(telegram::webhook))
         .merge(protected);
 
     tokio::spawn(worker::run());

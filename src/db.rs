@@ -206,7 +206,7 @@ pub async fn list_messages(conn: &Connection, page: i64, per_page: i64) -> Vec<M
     let offset = (page.max(1) - 1) * per_page;
     let mut rows = conn
         .query(
-            "SELECT chat_id, message_id, date_unixtime, from_name, text FROM messages ORDER BY date_unixtime LIMIT ?1 OFFSET ?2",
+            "SELECT chat_id, message_id, date_unixtime, from_name, text FROM messages ORDER BY date_unixtime DESC LIMIT ?1 OFFSET ?2",
             params![per_page, offset],
         )
         .await
