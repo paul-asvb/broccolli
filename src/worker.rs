@@ -109,6 +109,7 @@ async fn download_tiktok(
                                 chat_id,
                                 message_id,
                                 &analysis.summary,
+                                &analysis.short_summary,
                                 &analysis.on_screen_text,
                                 &analysis.topics,
                                 vision_model,

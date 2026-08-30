@@ -30,7 +30,7 @@ pub enum Route {
 
 fn switch(route: Route) -> Html {
     match route {
-        Route::Home => html! { <h1>{ "Hello from broccolli!" }</h1> },
+        Route::Home => html! { <Redirect<Route> to={Route::Messages} /> },
         Route::Messages => html! { <MessagesPage /> },
         Route::Message { chat_id, message_id } => {
             html! { <MessageDetailPage chat_id={chat_id} message_id={message_id} /> }

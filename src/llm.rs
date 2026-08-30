@@ -130,6 +130,7 @@ pub async fn classify(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenshotAnalysis {
     pub summary: String,
+    pub short_summary: String,
     pub on_screen_text: String,
     pub topics: Vec<String>,
 }
@@ -150,9 +151,11 @@ pub async fn analyze_screenshots(
     let prompt = format!(
         "The following {} images are screenshots taken at even 5% intervals throughout a video, \
          in chronological order. Extract any on-screen text (captions, overlays, subtitles) verbatim \
-         where legible, and write a concise summary of what the video shows and its topics. \
+         where legible, and write a concise summary of what the video shows and its topics, plus a \
+         short_summary: a single sentence, under 100 characters, suitable for a table column. \
          Respond with ONLY a JSON object of the form \
-         {{\"summary\": string, \"on_screen_text\": string, \"topics\": [string]}}, no other text.",
+         {{\"summary\": string, \"short_summary\": string, \"on_screen_text\": string, \"topics\": [string]}}, \
+         no other text.",
         screenshots.len()
     );
 
@@ -224,8 +227,10 @@ mod tests {
             .expect("analysis failed");
 
         assert!(!analysis.summary.is_empty());
+        assert!(!analysis.short_summary.is_empty());
 
         println!("summary: {}", analysis.summary);
+        println!("short_summary: {}", analysis.short_summary);
         println!("on_screen_text: {}", analysis.on_screen_text);
         println!("topics: {:?}", analysis.topics);
     }

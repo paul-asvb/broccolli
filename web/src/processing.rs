@@ -1,8 +1,11 @@
 use gloo_net::http::Request;
+use gloo_timers::callback::Interval;
 use js_sys::Date;
 use serde::Deserialize;
 use wasm_bindgen::JsValue;
 use yew::prelude::*;
+
+const POLL_INTERVAL_MS: u32 = 5_000;
 
 #[derive(Deserialize, Clone, PartialEq)]
 struct StatusCount {
@@ -51,11 +54,20 @@ pub fn processing_page() -> Html {
     {
         let data = data.clone();
         use_effect_with((), move |_| {
-            let data = data.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                data.set(fetch_summary().await);
-            });
-            || ()
+            let fetch_now = {
+                let data = data.clone();
+                move || {
+                    let data = data.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        data.set(fetch_summary().await);
+                    });
+                }
+            };
+
+            fetch_now();
+            let interval = Interval::new(POLL_INTERVAL_MS, fetch_now);
+
+            move || drop(interval)
         });
     }
 

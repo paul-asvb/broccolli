@@ -17,6 +17,7 @@ struct Message {
     message_id: i64,
     date_unixtime: i64,
     text: Option<String>,
+    short_summary: Option<String>,
 }
 
 fn format_date(unixtime: i64) -> String {
@@ -95,27 +96,38 @@ pub fn messages_page() -> Html {
     html! {
         <div>
             <h2>{ format!("Messages — page {} of {} ({} total)", data.page, total_pages, data.total) }</h2>
-            <ul>
-                { for data.messages.iter().map(|m| {
-                    let chat_id = m.chat_id;
-                    let message_id = m.message_id;
-                    let onclick = {
-                        let delete_message = delete_message.clone();
-                        Callback::from(move |_| delete_message.emit((chat_id, message_id)))
-                    };
-                    html! {
-                        <li>
-                            <a href={format!("/messages/{}/{}", m.chat_id, m.message_id)}>
-                                <strong>{ format_date(m.date_unixtime) }</strong>
-                            </a>
-                            { ": " }
-                            { m.text.clone().unwrap_or_default() }
-                            { " " }
-                            <button onclick={onclick}>{ "Delete" }</button>
-                        </li>
-                    }
-                }) }
-            </ul>
+            <table>
+                <thead>
+                    <tr>
+                        <th>{ "Date" }</th>
+                        <th>{ "Text" }</th>
+                        <th>{ "Summary" }</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    { for data.messages.iter().map(|m| {
+                        let chat_id = m.chat_id;
+                        let message_id = m.message_id;
+                        let onclick = {
+                            let delete_message = delete_message.clone();
+                            Callback::from(move |_| delete_message.emit((chat_id, message_id)))
+                        };
+                        html! {
+                            <tr>
+                                <td>
+                                    <a href={format!("/messages/{}/{}", m.chat_id, m.message_id)}>
+                                        { format_date(m.date_unixtime) }
+                                    </a>
+                                </td>
+                                <td>{ m.text.clone().unwrap_or_default() }</td>
+                                <td>{ m.short_summary.clone().unwrap_or_default() }</td>
+                                <td><button onclick={onclick}>{ "Delete" }</button></td>
+                            </tr>
+                        }
+                    }) }
+                </tbody>
+            </table>
             <p>
                 <a href={prev_href}>{ "« prev" }</a>
                 { " " }

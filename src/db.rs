@@ -128,6 +128,21 @@ pub async fn ensure_schema(conn: &Connection) {
     .await
     .expect("failed to create tiktok_analyses table");
 
+    // tiktok_analyses predates the `short_summary` column, so existing databases need it backfilled.
+    let has_short_summary_column = table_info_for(conn, "tiktok_analyses")
+        .await
+        .iter()
+        .any(|(name, _)| name == "short_summary");
+    if !has_short_summary_column {
+        conn.execute(
+            "ALTER TABLE tiktok_analyses ADD COLUMN short_summary TEXT NOT NULL DEFAULT ''",
+            (),
+        )
+        .await
+        .expect("failed to add short_summary column");
+        log::info!("added short_summary column to tiktok_analyses table");
+    }
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS tiktok_analyses_message_idx ON tiktok_analyses (chat_id, message_id)",
         (),
@@ -139,8 +154,12 @@ pub async fn ensure_schema(conn: &Connection) {
 }
 
 pub async fn table_info(conn: &Connection) -> Vec<(String, String)> {
+    table_info_for(conn, "messages").await
+}
+
+async fn table_info_for(conn: &Connection, table: &str) -> Vec<(String, String)> {
     let mut rows = conn
-        .query("PRAGMA table_info(messages)", ())
+        .query(&format!("PRAGMA table_info({table})"), ())
         .await
         .expect("failed to query schema");
 
@@ -199,6 +218,7 @@ pub struct Message {
     pub date_unixtime: i64,
     pub from_name: Option<String>,
     pub text: Option<String>,
+    pub short_summary: Option<String>,
 }
 
 pub async fn get_message(conn: &Connection, chat_id: i64, message_id: i64) -> Option<Message> {
@@ -216,14 +236,23 @@ pub async fn get_message(conn: &Connection, chat_id: i64, message_id: i64) -> Op
         date_unixtime: row.get(2).unwrap(),
         from_name: row.get(3).unwrap(),
         text: row.get(4).unwrap(),
+        short_summary: None,
     })
 }
+
+/// Latest tiktok short summary per message, correlated by (chat_id, message_id). Other analysis
+/// kinds can be added to this subquery (e.g. via COALESCE) as they grow their own short summaries.
+const SHORT_SUMMARY_SUBQUERY: &str = "(SELECT short_summary FROM tiktok_analyses ta \
+     WHERE ta.chat_id = m.chat_id AND ta.message_id = m.message_id ORDER BY created_at DESC LIMIT 1)";
 
 pub async fn list_messages(conn: &Connection, page: i64, per_page: i64) -> Vec<Message> {
     let offset = (page.max(1) - 1) * per_page;
     let mut rows = conn
         .query(
-            "SELECT chat_id, message_id, date_unixtime, from_name, text FROM messages WHERE deleted = 0 ORDER BY date_unixtime DESC LIMIT ?1 OFFSET ?2",
+            &format!(
+                "SELECT m.chat_id, m.message_id, m.date_unixtime, m.from_name, m.text, {SHORT_SUMMARY_SUBQUERY}
+                 FROM messages m WHERE m.deleted = 0 ORDER BY m.date_unixtime DESC LIMIT ?1 OFFSET ?2"
+            ),
             params![per_page, offset],
         )
         .await
@@ -237,6 +266,7 @@ pub async fn list_messages(conn: &Connection, page: i64, per_page: i64) -> Vec<M
             date_unixtime: row.get(2).unwrap(),
             from_name: row.get(3).unwrap(),
             text: row.get(4).unwrap(),
+            short_summary: row.get(5).unwrap(),
         });
     }
     messages
@@ -293,6 +323,7 @@ pub async fn message_context(
         date_unixtime: row.get(2).unwrap(),
         from_name: row.get(3).unwrap(),
         text: row.get(4).unwrap(),
+        short_summary: None,
     });
 
     let mut ctx_rows = conn
@@ -312,6 +343,7 @@ pub async fn message_context(
             date_unixtime: row.get(2).unwrap(),
             from_name: row.get(3).unwrap(),
             text: row.get(4).unwrap(),
+            short_summary: None,
         });
     }
     context.reverse();
@@ -348,20 +380,22 @@ pub async fn insert_analysis(
     .expect("failed to insert analysis");
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_tiktok_analysis(
     conn: &Connection,
     chat_id: i64,
     message_id: i64,
     summary: &str,
+    short_summary: &str,
     on_screen_text: &str,
     topics: &[String],
     model: &str,
 ) {
     let topics_json = serde_json::to_string(topics).expect("failed to serialize topics");
     conn.execute(
-        "INSERT INTO tiktok_analyses (chat_id, message_id, summary, on_screen_text, topics, model, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![chat_id, message_id, summary, on_screen_text, topics_json, model, now_unix()],
+        "INSERT INTO tiktok_analyses (chat_id, message_id, summary, short_summary, on_screen_text, topics, model, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![chat_id, message_id, summary, short_summary, on_screen_text, topics_json, model, now_unix()],
     )
     .await
     .expect("failed to insert tiktok analysis");
@@ -370,6 +404,7 @@ pub async fn insert_tiktok_analysis(
 #[derive(Serialize)]
 pub struct TiktokAnalysis {
     pub summary: String,
+    pub short_summary: String,
     pub on_screen_text: String,
     pub topics: Vec<String>,
     pub model: String,
@@ -379,7 +414,7 @@ pub struct TiktokAnalysis {
 pub async fn get_latest_tiktok_analysis(conn: &Connection, chat_id: i64, message_id: i64) -> Option<TiktokAnalysis> {
     let mut rows = conn
         .query(
-            "SELECT summary, on_screen_text, topics, model, created_at FROM tiktok_analyses
+            "SELECT summary, short_summary, on_screen_text, topics, model, created_at FROM tiktok_analyses
              WHERE chat_id = ?1 AND message_id = ?2 ORDER BY created_at DESC LIMIT 1",
             params![chat_id, message_id],
         )
@@ -387,13 +422,14 @@ pub async fn get_latest_tiktok_analysis(conn: &Connection, chat_id: i64, message
         .expect("failed to query tiktok_analyses");
 
     rows.next().await.unwrap().map(|row| {
-        let topics_json: String = row.get(2).unwrap();
+        let topics_json: String = row.get(3).unwrap();
         TiktokAnalysis {
             summary: row.get(0).unwrap(),
-            on_screen_text: row.get(1).unwrap(),
+            short_summary: row.get(1).unwrap(),
+            on_screen_text: row.get(2).unwrap(),
             topics: serde_json::from_str(&topics_json).unwrap_or_default(),
-            model: row.get(3).unwrap(),
-            created_at: row.get(4).unwrap(),
+            model: row.get(4).unwrap(),
+            created_at: row.get(5).unwrap(),
         }
     })
 }
@@ -542,6 +578,22 @@ pub async fn mark_deleted(conn: &Connection, chat_id: i64, message_id: i64) -> b
     log::debug!("marked chat {chat_id} message {message_id} deleted ({affected} row(s) affected)");
 
     affected > 0
+}
+
+/// One-time cleanup: marks every not-yet-deleted message with no text content as deleted.
+/// Returns the number of rows affected.
+pub async fn mark_empty_text_deleted(conn: &Connection) -> u64 {
+    let affected = conn
+        .execute(
+            "UPDATE messages SET deleted = 1 WHERE deleted = 0 AND (text IS NULL OR text = '')",
+            (),
+        )
+        .await
+        .expect("failed to mark empty-content messages deleted");
+
+    log::info!("marked {affected} empty-content message(s) deleted");
+
+    affected
 }
 
 #[derive(Serialize)]
@@ -722,12 +774,23 @@ mod tests {
         .expect("pre-test cleanup failed");
 
         let topics = vec!["a".to_string(), "b".to_string()];
-        insert_tiktok_analysis(&conn, chat_id, message_id, "test summary", "test on-screen text", &topics, "test-model").await;
+        insert_tiktok_analysis(
+            &conn,
+            chat_id,
+            message_id,
+            "test summary",
+            "test short summary",
+            "test on-screen text",
+            &topics,
+            "test-model",
+        )
+        .await;
 
         let analysis = get_latest_tiktok_analysis(&conn, chat_id, message_id)
             .await
             .expect("analysis missing");
         assert_eq!(analysis.summary, "test summary");
+        assert_eq!(analysis.short_summary, "test short summary");
         assert_eq!(analysis.on_screen_text, "test on-screen text");
         assert_eq!(analysis.topics, topics);
         assert_eq!(analysis.model, "test-model");
