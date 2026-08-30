@@ -1,8 +1,12 @@
 use crate::db::Message;
-use serde::Deserialize;
+use base64::Engine;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+
+/// Default vision-capable model used to analyze TikTok video screenshots.
+pub const DEFAULT_VISION_MODEL: &str = "google/gemini-2.5-flash";
 
 /// Categories a message can be triaged into, based on what it contains rather than
 /// what it means. Each category maps to a distinct downstream processing pipeline
@@ -121,4 +125,108 @@ pub async fn classify(
     );
 
     Ok((classification, raw.to_string()))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScreenshotAnalysis {
+    pub summary: String,
+    pub on_screen_text: String,
+    pub topics: Vec<String>,
+}
+
+/// Analyzes a chronologically-ordered sequence of video screenshots (e.g. from
+/// `tiktok::capture_screenshots`) via a vision-capable OpenRouter model, extracting
+/// on-screen text and a summary of what the video shows.
+pub async fn analyze_screenshots(
+    client: &reqwest::Client,
+    model: &str,
+    screenshots: &[std::path::PathBuf],
+) -> Result<(ScreenshotAnalysis, String), String> {
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .map_err(|_| "OPENROUTER_API_KEY not set".to_string())?;
+
+    log::debug!("analyzing {} screenshots with model {model}", screenshots.len());
+
+    let prompt = format!(
+        "The following {} images are screenshots taken at even 5% intervals throughout a video, \
+         in chronological order. Extract any on-screen text (captions, overlays, subtitles) verbatim \
+         where legible, and write a concise summary of what the video shows and its topics. \
+         Respond with ONLY a JSON object of the form \
+         {{\"summary\": string, \"on_screen_text\": string, \"topics\": [string]}}, no other text.",
+        screenshots.len()
+    );
+
+    let mut content = vec![serde_json::json!({"type": "text", "text": prompt})];
+    for path in screenshots {
+        let bytes = std::fs::read(path)
+            .map_err(|e| format!("failed to read screenshot {}: {e}", path.display()))?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        content.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": {"url": format!("data:image/jpeg;base64,{encoded}")},
+        }));
+    }
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "user", "content": content},
+        ],
+        "response_format": {"type": "json_object"},
+    });
+
+    let resp = client
+        .post(OPENROUTER_URL)
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("openrouter request failed: {e}"))?;
+
+    let raw: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("failed to parse openrouter response: {e}"))?;
+
+    log::debug!("openrouter screenshot-analysis raw response: {raw}");
+
+    let content = raw["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| format!("unexpected openrouter response shape: {raw}"))?;
+
+    let analysis: ScreenshotAnalysis = serde_json::from_str(content)
+        .map_err(|e| format!("failed to parse screenshot analysis json ({content}): {e}"))?;
+
+    log::debug!("screenshot analysis: {} topics found", analysis.topics.len());
+
+    Ok((analysis, raw.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "hits the live TikTok CDN via yt-dlp/ffmpeg and the live OpenRouter API; requires OPENROUTER_API_KEY"]
+    async fn analyzes_real_screenshots() {
+        dotenvy::dotenv().ok();
+
+        let video = crate::tiktok::download("https://vm.tiktok.com/ZGdxtAF4f/", "unit-test-vision")
+            .await
+            .expect("download failed");
+        let screenshots = crate::tiktok::capture_screenshots(&video, "unit-test-vision")
+            .await
+            .expect("screenshot capture failed");
+
+        let client = reqwest::Client::new();
+        let (analysis, _raw) = analyze_screenshots(&client, DEFAULT_VISION_MODEL, &screenshots)
+            .await
+            .expect("analysis failed");
+
+        assert!(!analysis.summary.is_empty());
+
+        println!("summary: {}", analysis.summary);
+        println!("on_screen_text: {}", analysis.on_screen_text);
+        println!("topics: {:?}", analysis.topics);
+    }
 }

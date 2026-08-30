@@ -97,17 +97,22 @@ pub async fn fetch_metadata(client: &reqwest::Client, tiktok_url: &str) -> Resul
         .ok_or_else(|| "apify returned no metadata for this video".to_string())
 }
 
-/// Writes metadata into `$TMPDIR/broccolli-tiktok/<name>.json`, returning the file path.
-pub fn save_metadata_to_temp(metadata: &Value, name: &str) -> Result<PathBuf, String> {
+/// Writes JSON into `$TMPDIR/broccolli-tiktok/<filename>.json`, returning the file path.
+fn save_json_to_temp(value: &Value, filename: &str) -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join(TEMP_SUBDIR);
     std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create temp dir: {e}"))?;
 
-    let path = dir.join(format!("{name}.json"));
-    let pretty = serde_json::to_vec_pretty(metadata).map_err(|e| format!("failed to serialize metadata: {e}"))?;
-    std::fs::write(&path, pretty).map_err(|e| format!("failed to write metadata file: {e}"))?;
+    let path = dir.join(format!("{filename}.json"));
+    let pretty = serde_json::to_vec_pretty(value).map_err(|e| format!("failed to serialize json: {e}"))?;
+    std::fs::write(&path, pretty).map_err(|e| format!("failed to write json file: {e}"))?;
 
+    Ok(path)
+}
+
+/// Writes metadata into `$TMPDIR/broccolli-tiktok/<name>.json`, returning the file path.
+pub fn save_metadata_to_temp(metadata: &Value, name: &str) -> Result<PathBuf, String> {
+    let path = save_json_to_temp(metadata, name)?;
     log::debug!("saved tiktok metadata to {}", path.display());
-
     Ok(path)
 }
 

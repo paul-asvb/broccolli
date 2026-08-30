@@ -34,11 +34,21 @@ struct Analysis {
     created_at: i64,
 }
 
+#[derive(Deserialize, Clone, PartialEq)]
+struct TiktokAnalysis {
+    summary: String,
+    on_screen_text: String,
+    topics: Vec<String>,
+    model: String,
+    created_at: i64,
+}
+
 #[derive(Deserialize, Clone, PartialEq, Default)]
 struct MessageDetail {
     message: Option<Message>,
     processing: Option<ProcessingState>,
     analysis: Option<Analysis>,
+    tiktok_analysis: Option<TiktokAnalysis>,
 }
 
 fn format_date(unixtime: i64) -> String {
@@ -143,6 +153,22 @@ pub fn message_detail_page(props: &Props) -> Html {
                     </ul>
                 },
                 None => html! { <p>{ "no analysis yet" }</p> },
+            } }
+
+            <h3>{ "TikTok summary" }</h3>
+            { match data.tiktok_analysis {
+                Some(t) => html! {
+                    <div>
+                        <p>{ t.summary }</p>
+                        <ul>
+                            <li>{ format!("on-screen text: {}", t.on_screen_text) }</li>
+                            <li>{ format!("topics: {}", t.topics.join(", ")) }</li>
+                            <li>{ format!("model: {}", t.model) }</li>
+                            <li>{ format!("analyzed: {}", format_date(t.created_at)) }</li>
+                        </ul>
+                    </div>
+                },
+                None => html! { <p>{ "no tiktok summary yet" }</p> },
             } }
         </div>
     }

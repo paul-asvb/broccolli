@@ -96,6 +96,29 @@ pub async fn ensure_schema(conn: &Connection) {
     )
     .await
     .expect("failed to create analyses message index");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tiktok_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            summary TEXT NOT NULL,
+            on_screen_text TEXT NOT NULL,
+            topics TEXT NOT NULL,
+            model TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )",
+        (),
+    )
+    .await
+    .expect("failed to create tiktok_analyses table");
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS tiktok_analyses_message_idx ON tiktok_analyses (chat_id, message_id)",
+        (),
+    )
+    .await
+    .expect("failed to create tiktok_analyses message index");
 }
 
 pub async fn table_info(conn: &Connection) -> Vec<(String, String)> {
@@ -306,6 +329,56 @@ pub async fn insert_analysis(
     )
     .await
     .expect("failed to insert analysis");
+}
+
+pub async fn insert_tiktok_analysis(
+    conn: &Connection,
+    chat_id: i64,
+    message_id: i64,
+    summary: &str,
+    on_screen_text: &str,
+    topics: &[String],
+    model: &str,
+) {
+    let topics_json = serde_json::to_string(topics).expect("failed to serialize topics");
+    conn.execute(
+        "INSERT INTO tiktok_analyses (chat_id, message_id, summary, on_screen_text, topics, model, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![chat_id, message_id, summary, on_screen_text, topics_json, model, now_unix()],
+    )
+    .await
+    .expect("failed to insert tiktok analysis");
+}
+
+#[derive(Serialize)]
+pub struct TiktokAnalysis {
+    pub summary: String,
+    pub on_screen_text: String,
+    pub topics: Vec<String>,
+    pub model: String,
+    pub created_at: i64,
+}
+
+pub async fn get_latest_tiktok_analysis(conn: &Connection, chat_id: i64, message_id: i64) -> Option<TiktokAnalysis> {
+    let mut rows = conn
+        .query(
+            "SELECT summary, on_screen_text, topics, model, created_at FROM tiktok_analyses
+             WHERE chat_id = ?1 AND message_id = ?2 ORDER BY created_at DESC LIMIT 1",
+            params![chat_id, message_id],
+        )
+        .await
+        .expect("failed to query tiktok_analyses");
+
+    rows.next().await.unwrap().map(|row| {
+        let topics_json: String = row.get(2).unwrap();
+        TiktokAnalysis {
+            summary: row.get(0).unwrap(),
+            on_screen_text: row.get(1).unwrap(),
+            topics: serde_json::from_str(&topics_json).unwrap_or_default(),
+            model: row.get(3).unwrap(),
+            created_at: row.get(4).unwrap(),
+        }
+    })
 }
 
 pub async fn mark_processing_done(conn: &Connection, chat_id: i64, message_id: i64) {
@@ -591,4 +664,44 @@ pub async fn insert_messages(conn: &Connection, chat_id: i64, messages: &[Value]
         .expect("failed to commit transaction");
 
     inserted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "hits the live Turso database; requires TURSO_DATABASE_URL/TURSO_AUTH_TOKEN"]
+    async fn round_trips_tiktok_analysis() {
+        dotenvy::dotenv().ok();
+        let conn = connect().await;
+        ensure_schema(&conn).await;
+
+        let chat_id = -1;
+        let message_id = -1;
+        conn.execute(
+            "DELETE FROM tiktok_analyses WHERE chat_id = ?1 AND message_id = ?2",
+            params![chat_id, message_id],
+        )
+        .await
+        .expect("pre-test cleanup failed");
+
+        let topics = vec!["a".to_string(), "b".to_string()];
+        insert_tiktok_analysis(&conn, chat_id, message_id, "test summary", "test on-screen text", &topics, "test-model").await;
+
+        let analysis = get_latest_tiktok_analysis(&conn, chat_id, message_id)
+            .await
+            .expect("analysis missing");
+        assert_eq!(analysis.summary, "test summary");
+        assert_eq!(analysis.on_screen_text, "test on-screen text");
+        assert_eq!(analysis.topics, topics);
+        assert_eq!(analysis.model, "test-model");
+
+        conn.execute(
+            "DELETE FROM tiktok_analyses WHERE chat_id = ?1 AND message_id = ?2",
+            params![chat_id, message_id],
+        )
+        .await
+        .expect("cleanup failed");
+    }
 }

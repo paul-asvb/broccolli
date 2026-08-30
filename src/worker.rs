@@ -13,6 +13,8 @@ pub async fn run() {
     let client = reqwest::Client::new();
 
     let model = std::env::var("OPENROUTER_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let vision_model =
+        std::env::var("OPENROUTER_VISION_MODEL").unwrap_or_else(|_| llm::DEFAULT_VISION_MODEL.to_string());
     let poll_interval = std::env::var("WORKER_POLL_INTERVAL_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -47,7 +49,7 @@ pub async fn run() {
                     .await;
 
                     if classification.category == "tiktok_video" {
-                        download_tiktok(&client, chat_id, message_id, &target).await;
+                        download_tiktok(&conn, &client, &vision_model, chat_id, message_id, &target).await;
                     }
 
                     db::mark_processing_done(&conn, chat_id, message_id).await;
@@ -61,10 +63,17 @@ pub async fn run() {
     }
 }
 
-/// Downloads the video and fetches its metadata for a classified TikTok message,
-/// stashing both in a temp dir, on a best-effort basis. A failure here doesn't fail
+/// Downloads the video, fetches its metadata, and stores a screenshot-derived summary
+/// for a classified TikTok message, on a best-effort basis. A failure here doesn't fail
 /// the message's processing state — the classification itself already succeeded.
-async fn download_tiktok(client: &reqwest::Client, chat_id: i64, message_id: i64, target: &db::Message) {
+async fn download_tiktok(
+    conn: &libsql::Connection,
+    client: &reqwest::Client,
+    vision_model: &str,
+    chat_id: i64,
+    message_id: i64,
+    target: &db::Message,
+) {
     let Some(url) = target.text.as_deref().and_then(tiktok::find_url) else {
         eprintln!("tiktok_video classification for chat {chat_id} message {message_id} but no tiktok.com URL found in text");
         return;
@@ -75,10 +84,31 @@ async fn download_tiktok(client: &reqwest::Client, chat_id: i64, message_id: i64
             println!("saved tiktok video for chat {chat_id} message {message_id} to {}", path.display());
 
             match tiktok::capture_screenshots(&path, &format!("{chat_id}_{message_id}")).await {
-                Ok(paths) => println!(
-                    "captured {} tiktok screenshots for chat {chat_id} message {message_id}",
-                    paths.len()
-                ),
+                Ok(paths) => {
+                    println!(
+                        "captured {} tiktok screenshots for chat {chat_id} message {message_id}",
+                        paths.len()
+                    );
+
+                    match llm::analyze_screenshots(client, vision_model, &paths).await {
+                        Ok((analysis, _raw)) => {
+                            db::insert_tiktok_analysis(
+                                conn,
+                                chat_id,
+                                message_id,
+                                &analysis.summary,
+                                &analysis.on_screen_text,
+                                &analysis.topics,
+                                vision_model,
+                            )
+                            .await;
+                            println!("saved tiktok screenshot analysis for chat {chat_id} message {message_id}");
+                        }
+                        Err(err) => eprintln!(
+                            "failed to analyze tiktok screenshots for chat {chat_id} message {message_id}: {err}"
+                        ),
+                    }
+                }
                 Err(err) => eprintln!("failed to capture tiktok screenshots for chat {chat_id} message {message_id}: {err}"),
             }
         }
