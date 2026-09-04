@@ -93,7 +93,6 @@ pub async fn cookie_auth(req: Request, next: Next) -> Response {
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
-    username: String,
     password: String,
 }
 
@@ -102,18 +101,17 @@ pub async fn login(Json(body): Json<LoginRequest>) -> Response {
         return missing_config("SESSION_SECRET");
     };
     let admin_auth = std::env::var("ADMIN_AUTH").unwrap_or_default();
-    let Some((expected_user, expected_pass)) = admin_auth.split_once(':') else {
-        return missing_config("ADMIN_AUTH (expected user:pass)");
-    };
+    if admin_auth.is_empty() {
+        return missing_config("ADMIN_AUTH");
+    }
 
-    if crate::constant_time_eq(body.username.as_bytes(), expected_user.as_bytes())
-        && crate::constant_time_eq(body.password.as_bytes(), expected_pass.as_bytes())
+    if crate::constant_time_eq(body.password.as_bytes(), admin_auth.as_bytes())
     {
         let token = issue_token(secret.as_bytes());
         let cookie = set_cookie_header(&token, SESSION_LIFETIME_SECS as i64);
         (StatusCode::OK, [(header::SET_COOKIE, cookie)]).into_response()
     } else {
-        log::warn!("failed login attempt for user {}", body.username);
+        log::warn!("failed login attempt");
         (StatusCode::UNAUTHORIZED, "invalid credentials").into_response()
     }
 }

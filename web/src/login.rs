@@ -5,7 +5,6 @@ use yew::prelude::*;
 
 #[derive(Serialize)]
 struct LoginRequest {
-    username: String,
     password: String,
 }
 
@@ -16,18 +15,10 @@ pub struct Props {
 
 #[function_component(LoginPage)]
 pub fn login_page(props: &Props) -> Html {
-    let username = use_state(String::new);
     let password = use_state(String::new);
     let error = use_state(|| None::<String>);
     let submitting = use_state(|| false);
 
-    let on_username_input = {
-        let username = username.clone();
-        Callback::from(move |e: InputEvent| {
-            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-            username.set(input.value());
-        })
-    };
     let on_password_input = {
         let password = password.clone();
         Callback::from(move |e: InputEvent| {
@@ -37,21 +28,19 @@ pub fn login_page(props: &Props) -> Html {
     };
 
     let on_submit = {
-        let username = username.clone();
         let password = password.clone();
         let error = error.clone();
         let submitting = submitting.clone();
         let on_success = props.on_success.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
-            let username = (*username).clone();
             let password = (*password).clone();
             let error = error.clone();
             let submitting = submitting.clone();
             let on_success = on_success.clone();
             submitting.set(true);
             spawn_local(async move {
-                let body = LoginRequest { username, password };
+                let body = LoginRequest { password };
                 let result = match Request::post("/api/login").json(&body) {
                     Ok(req) => req.send().await,
                     Err(_) => {
@@ -66,7 +55,7 @@ pub fn login_page(props: &Props) -> Html {
                         error.set(None);
                         on_success.emit(());
                     }
-                    Ok(_) => error.set(Some("invalid username or password".to_string())),
+                    Ok(_) => error.set(Some("invalid password".to_string())),
                     Err(_) => error.set(Some("login request failed".to_string())),
                 }
             });
@@ -81,10 +70,6 @@ pub fn login_page(props: &Props) -> Html {
             <div class="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
                 <h2 class="mb-4 text-lg font-semibold text-gray-900">{ "Log in" }</h2>
                 <form onsubmit={on_submit} class="space-y-4">
-                    <div>
-                        <label for="username" class="mb-1 block text-sm font-medium text-gray-700">{ "Username" }</label>
-                        <input id="username" type="text" class={input_class} value={(*username).clone()} oninput={on_username_input} />
-                    </div>
                     <div>
                         <label for="password" class="mb-1 block text-sm font-medium text-gray-700">{ "Password" }</label>
                         <input id="password" type="password" class={input_class} value={(*password).clone()} oninput={on_password_input} />
