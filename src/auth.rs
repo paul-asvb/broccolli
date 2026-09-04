@@ -100,12 +100,12 @@ pub async fn login(Json(body): Json<LoginRequest>) -> Response {
     let Some(secret) = session_secret() else {
         return missing_config("SESSION_SECRET");
     };
-    let admin_auth = std::env::var("ADMIN_AUTH").unwrap_or_default();
-    if admin_auth.is_empty() {
-        return missing_config("ADMIN_AUTH");
+    let site_password = std::env::var("SITE_PASSWORD").unwrap_or_default();
+    if site_password.is_empty() {
+        return missing_config("SITE_PASSWORD");
     }
 
-    if crate::constant_time_eq(body.password.as_bytes(), admin_auth.as_bytes())
+    if crate::constant_time_eq(body.password.as_bytes(), site_password.as_bytes())
     {
         let token = issue_token(secret.as_bytes());
         let cookie = set_cookie_header(&token, SESSION_LIFETIME_SECS as i64);
